@@ -1,0 +1,7 @@
+numpy>=2.0,<3.0
+torch>=2.2,<3.0
+scapy>=2.5,<3.0
+impacket>=0.12,<1.0
+dnspython>=2.7,<3.0
+rich>=13.9,<14.0
+PyYAML>=6.0,<7.0

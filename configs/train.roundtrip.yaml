@@ -1,0 +1,11 @@
+data: data/synthetic_dataset.csv
+artifact: artifacts/snn_model.json
+epochs: 25
+steps: 12
+hidden_dim: 12
+batch_size: 64
+learning_rate: 0.01
+beta: 0.82
+threshold: 1.0
+seed: 7
+trainer: auto

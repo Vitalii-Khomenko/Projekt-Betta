@@ -1,0 +1,53 @@
+{
+  "kind": "benchmark",
+  "registry": "data\\experiments.db",
+  "domains": {
+    "verified_real": {
+      "experiments": 1,
+      "metrics": {
+        "baseline_only_count": {
+          "count": 1,
+          "avg": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "candidate_only_count": {
+          "count": 1,
+          "avg": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "candidate_speedup_vs_baseline": {
+          "count": 1,
+          "avg": 0.9230769230769231,
+          "min": 0.9230769230769231,
+          "max": 0.9230769230769231
+        },
+        "matched_open_count": {
+          "count": 1,
+          "avg": 8.0,
+          "min": 8.0,
+          "max": 8.0
+        },
+        "precision_vs_baseline": {
+          "count": 1,
+          "avg": 1.0,
+          "min": 1.0,
+          "max": 1.0
+        },
+        "recall_vs_baseline": {
+          "count": 1,
+          "avg": 1.0,
+          "min": 1.0,
+          "max": 1.0
+        },
+        "service_precision_on_overlap": {
+          "count": 1,
+          "avg": 1.0,
+          "min": 1.0,
+          "max": 1.0
+        }
+      }
+    }
+  }
+}

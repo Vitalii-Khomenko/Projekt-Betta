@@ -1,0 +1,5 @@
+[toolchain]
+channel = "stable"
+# No target pinned - uses platform native:
+#   Windows: x86_64-pc-windows-msvc  (requires MSVC build tools)
+#   Linux:   x86_64-unknown-linux-gnu

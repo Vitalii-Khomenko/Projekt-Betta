@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyright
+      - name: Verify editable install
+        run: |
+          python -c "import training.tools.scanner as scanner; import snn_cyber; assert scanner.PROFILES"
+          betta-morpho-launcher --help
+          betta-morpho-scanner --help
+      - name: Run Pyright
+        run: |
+          pyright
+      - name: Run Python tests
+        run: |
+          python launcher.py --help
+          python training/train.py --help
+          python training/evaluate.py --help
+          python -m unittest tools.test_launcher_smoke
+          python -m unittest tools.test_artifact_schema
+          python -m unittest tools.test_benchmark_registry
+          python -m unittest tools.test_golden_dataset
+          python -m unittest tools.test_scanner_telemetry
+          python -m unittest tools.test_service_catalog
+          python -m unittest tools.test_service_fingerprint
+          python -m unittest tools.test_verify_scan
+          python tools/test_decoys.py --port 19801
+      - name: Tiny prototype training smoke
+        run: |
+          python training/generate_synthetic_data.py --output data/ci_smoke_dataset.csv --samples-per-class 4 --seed 1 --assets 2
+          python training/train.py --data data/ci_smoke_dataset.csv --artifact artifacts/ci_smoke_model.json --trainer prototype --steps 8
+          python training/evaluate.py --data data/ci_smoke_dataset.csv --artifact artifacts/ci_smoke_model.json --preview 0
+
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust-runtime
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cargo fmt
+        run: cargo fmt --check
+      - name: Cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Cargo test
+        run: cargo test

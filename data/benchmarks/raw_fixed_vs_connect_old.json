@@ -1,0 +1,59 @@
+{
+  "benchmark_kind": "scan-comparison",
+  "benchmark_version": 1,
+  "domain": "verified_real",
+  "baseline_label": "connect_old",
+  "candidate_label": "raw_fixed",
+  "baseline": {
+    "path": "data\\scans\\20260404_184213_10.129.41.231\\20260404_184213_10.129.41.231_result.csv",
+    "open_ports": [
+      21,
+      22,
+      80,
+      443,
+      8000,
+      8001,
+      8080,
+      8889
+    ],
+    "open_count": 8,
+    "elapsed_seconds": 27.6
+  },
+  "candidate": {
+    "path": "data\\scans\\20260404_190057_10.129.41.231\\20260404_190057_10.129.41.231_result.csv",
+    "open_ports": [
+      21,
+      22,
+      80,
+      443,
+      8000,
+      8001,
+      8080,
+      8889
+    ],
+    "open_count": 8,
+    "elapsed_seconds": 29.9
+  },
+  "metrics": {
+    "matched_open_count": 8.0,
+    "baseline_only_count": 0.0,
+    "candidate_only_count": 0.0,
+    "recall_vs_baseline": 1.0,
+    "precision_vs_baseline": 1.0,
+    "service_precision_on_overlap": 1.0,
+    "candidate_speedup_vs_baseline": 0.9230769230769231
+  },
+  "differences": {
+    "baseline_only_ports": [],
+    "candidate_only_ports": []
+  },
+  "artifact_family": "benchmark-report",
+  "artifact_schema_version": 1,
+  "artifact_created_at": "2026-04-04T17:59:20Z",
+  "artifact_producer": "tools.benchmark_scans",
+  "model_type": "scan-comparison",
+  "artifact_metadata": {
+    "baseline_label": "connect_old",
+    "candidate_label": "raw_fixed"
+  }
+}

@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+.env
+.env.local
+*.local
+
+# Rust build output
+rust-runtime/target/
+Defense/runtime-rust/target/
+Cargo.lock
+
+# Generated scan outputs (too large / per-run)
+data/scans/
+data/scan_history.db
+data/samples/
+data/benchmarks/
+
+# Defense generated datasets and detector outputs
+Defense/data/
+Defense/artifacts/
+
+# Claude Code internal
+.claude/
+
+# Generated logs
+data/*.log
+data/*.db
+Defense/**/*.log
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Local scripts output
+logs/
+
+# Windows
+Thumbs.db
+desktop.ini

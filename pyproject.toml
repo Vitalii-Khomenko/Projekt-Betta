@@ -1,0 +1,55 @@
+# =============================================================================
+# pyproject.toml  -  Packaging metadata and build configuration for Betta-Morpho
+# Author : Vitalii Khomenko <khomenko.vitalii@pm.me>
+# License: Apache-2.0
+# Version : 2.3.3
+# =============================================================================
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "betta-morpho"
+version = "2.3.3"
+description = "Betta-Morpho neuromorphic adaptive scanner and telemetry tooling"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Vitalii Khomenko", email = "khomenko.vitalii@pm.me"},
+]
+keywords = ["security", "scanner", "neuromorphic", "snn", "telemetry"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Security",
+  "Topic :: System :: Networking :: Monitoring",
+]
+dependencies = [
+  "numpy>=2.0,<3.0",
+  "torch>=2.2,<3.0",
+  "scapy>=2.5,<3.0",
+  "impacket>=0.12,<1.0",
+  "dnspython>=2.7,<3.0",
+  "rich>=13.9,<14.0",
+  "PyYAML>=6.0,<7.0",
+]
+
+[project.scripts]
+betta-morpho-launcher = "launcher:main"
+betta-morpho-scanner = "training.tools.scanner:main"
+betta-morpho-verify = "tools.verify_scan:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["launcher"]
+packages = ["training", "training.tools", "tools", "snn_cyber"]
+
+[tool.setuptools.package-dir]
+snn_cyber = "training/src/snn_cyber"

@@ -1,0 +1,6 @@
+# -- Windows only -------------------------------------------------------------
+# Npcap SDK path - required for --features raw-scan on Windows.
+# Download SDK: https://npcap.com/#download  ->  extract to C:\Install\npcap-sdk-1.16
+# On Linux this variable is ignored; libpcap-dev is used via pkg-config instead.
+[env]
+LIB = { value = "C:/Install/npcap-sdk-1.16/Lib/x64", force = false }
