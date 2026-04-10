@@ -6,6 +6,7 @@ The project combines:
 - SNN-driven scanning logic
 - telemetry export and classifier training
 - enrichment and service fingerprinting
+- passive hostname/domain discovery and ranking
 - report generation and Nmap verification
 - benchmark and experiment tracking
 
@@ -14,13 +15,13 @@ entry point. Detailed usage is split into focused guides under `docs/`.
 
 > Scope: authorized security testing, HTB/CTF labs, local validation, and defensive research.
 
-Current release: `2.3.3`
+Current release: `2.4.0`
 
 ## Architecture At A Glance
 
 ```mermaid
 graph TD
-  P[Python Pre-training Layer] -->|classifier / scanner / service artifacts| S[Betta-Morpho Runtime]
+  P[Python Pre-training Layer] -->|classifier / scanner / service / host-discovery artifacts| S[Betta-Morpho Runtime]
   S -->|probe scheduling + scan actions| I[Runtime I/O And Enrichment]
   I --> T[Target Network]
   T -->|responses + RTT + flags + banners| I
@@ -88,6 +89,16 @@ python launcher.py scan \
   --report artifacts/snn_model.json
 ```
 
+Run passive hostname discovery on a saved scan:
+
+```bash
+python launcher.py discover-hostnames \
+  data/scans/SESSION/SESSION_result.csv \
+  --artifact artifacts/host_discovery_model.json \
+  --output data/scans/SESSION/SESSION_hostnames.csv \
+  --html data/scans/SESSION/SESSION_hostnames_report.html
+```
+
 Run a larger scan with checkpoints:
 
 ```bash
@@ -133,6 +144,8 @@ Start here, then go deeper only where needed:
   Synthetic data, real data, classifier training, replay, evaluation.
 - [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)  
   Launcher, scanner, service-model, benchmark, and registry commands.
+- [docs/HOST_DISCOVERY_GUIDE.md](docs/HOST_DISCOVERY_GUIDE.md)  
+  Passive hostname/domain extraction, ranking, training, and report outputs.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)  
   High-level architecture, artifact families, SNN model summary, data schema.
 

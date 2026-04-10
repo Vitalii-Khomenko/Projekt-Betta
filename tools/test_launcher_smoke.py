@@ -34,6 +34,17 @@ class LauncherSmokeTests(unittest.TestCase):
         self.assertTrue((launcher.ROOT / launcher.LAB_EXERCISE_SCRIPT).exists())
         self.assertTrue(launcher.SPEC_PATH.exists())
 
+    def test_discover_hostnames_parser_and_scan_flags_exist(self) -> None:
+        parser = launcher.build_parser()
+        discover_args = parser.parse_args(
+            ["discover-hostnames", "data/scans/example_result.csv", "--output", "data/scans/example_hostnames.csv"]
+        )
+        scan_args = parser.parse_args(["scan", "--target", "127.0.0.1", "--discover-hostnames"])
+
+        self.assertEqual(discover_args.inputs, ["data/scans/example_result.csv"])
+        self.assertEqual(discover_args.output, "data/scans/example_hostnames.csv")
+        self.assertTrue(scan_args.discover_hostnames)
+
 
 if __name__ == "__main__":
     unittest.main()

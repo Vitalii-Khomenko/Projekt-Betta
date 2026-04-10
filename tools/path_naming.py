@@ -30,6 +30,8 @@ def build_scan_output_paths(base_dir: Path, target: str, timestamp: str | None =
         "progress_log": output_dir / f"{prefix}_progress.log",
         "active_learning_csv": output_dir / f"{prefix}_active_learning.csv",
         "classified_csv": output_dir / f"{prefix}_classified.csv",
+        "hostnames_csv": output_dir / f"{prefix}_hostnames.csv",
+        "hostnames_html": output_dir / f"{prefix}_hostnames_report.html",
     }
 
 
@@ -55,6 +57,8 @@ def build_report_bundle_paths(
 def infer_session_prefix(path: Path) -> str:
     stem = path.stem
     for suffix in (
+        "_hostnames_report",
+        "_hostnames",
         "_result",
         "_report",
         "_progress",

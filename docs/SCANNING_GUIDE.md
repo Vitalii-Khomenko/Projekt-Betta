@@ -181,6 +181,31 @@ python training/tools/scanner.py scan \
   --verify-with-nmap
 ```
 
+## Passive Hostname Discovery
+
+Betta-Morpho can also extract hostname and domain candidates from the scan evidence it already collected.
+This is a post-scan passive step, not a brute-force enumeration step.
+
+Run it on a saved scan:
+
+```bash
+python launcher.py discover-hostnames \
+  data/scans/SESSION/SESSION_result.csv \
+  --artifact artifacts/host_discovery_model.json \
+  --output data/scans/SESSION/SESSION_hostnames.csv
+```
+
+Or attach it directly to the scan workflow:
+
+```bash
+python launcher.py scan \
+  --target 10.129.41.202 \
+  --ports top100 \
+  --report artifacts/snn_model.json \
+  --discover-hostnames \
+  --host-discovery-artifact artifacts/host_discovery_model.json
+```
+
 ## Reports And Artifacts
 
 Typical scan output directory includes:
@@ -190,9 +215,12 @@ Typical scan output directory includes:
 - `*_classified.csv`
 - `*_active_learning.csv`
 - `*_progress.log`
+- `*_hostnames.csv`
+- `*_hostnames_report.html`
 
 ## Related Reading
 
 - [SCAN_SPEED_THEORY_EN.md](SCAN_SPEED_THEORY_EN.md)
 - [CLI_REFERENCE.md](CLI_REFERENCE.md)
 - [ARCHITECTURE.md](ARCHITECTURE.md)
+- [HOST_DISCOVERY_GUIDE.md](HOST_DISCOVERY_GUIDE.md)

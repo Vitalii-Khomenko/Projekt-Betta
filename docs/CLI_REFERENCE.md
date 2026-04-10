@@ -18,11 +18,15 @@ This is the compact command map for the main Betta-Morpho entry points.
 - `python launcher.py evaluate --data FILE --artifact FILE`
 - `python launcher.py replay-dir --data-dir DIR --artifact FILE`
 - `python launcher.py scan-train --profile PROFILE --artifact FILE`
+- `python launcher.py discover-generate --output FILE --samples-per-class N`
+- `python launcher.py discover-train --data FILE --artifact FILE`
+- `python launcher.py discover-evaluate --data FILE --artifact FILE`
 
 ### Scanning
 
 - `python launcher.py scan --target IP --ports LIST`
 - `python launcher.py verify-betta-morpho --scan-csv FILE`
+- `python launcher.py discover-hostnames INPUTS... --output FILE`
 - `python launcher.py lab-services --host 127.0.0.1`
 - `python launcher.py lab-exercise --host 127.0.0.1`
 
@@ -64,6 +68,10 @@ Useful flags:
 - `--active-learning-output FILE`
 - `--verify-with-nmap`
 - `--save-weights FILE`
+- `--discover-hostnames`
+- `--host-discovery-artifact FILE`
+- `--host-discovery-output FILE`
+- `--host-discovery-html FILE`
 
 ### Train Scanner Strategy
 
@@ -80,6 +88,16 @@ python training/tools/scanner.py classify-results \
   --data data/scans/SESSION/SESSION_result.csv \
   --artifact artifacts/snn_model.json \
   --output data/scans/SESSION/SESSION_classified.csv
+```
+
+### Passive Host Discovery
+
+```bash
+python launcher.py discover-hostnames \
+  data/scans/SESSION/SESSION_result.csv \
+  --artifact artifacts/host_discovery_model.json \
+  --output data/scans/SESSION/SESSION_hostnames.csv \
+  --html data/scans/SESSION/SESSION_hostnames_report.html
 ```
 
 ## Rust Runtime
@@ -113,3 +131,4 @@ python tools/test_decoys.py --port 19801
 - [QUICKSTART.md](QUICKSTART.md)
 - [SCANNING_GUIDE.md](SCANNING_GUIDE.md)
 - [TRAINING_GUIDE.md](TRAINING_GUIDE.md)
+- [HOST_DISCOVERY_GUIDE.md](HOST_DISCOVERY_GUIDE.md)

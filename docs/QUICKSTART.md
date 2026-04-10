@@ -49,7 +49,19 @@ python launcher.py scan \
 
 This writes a session directory under `data/scans/`.
 
-## 4. Generate Training Data
+## 4. Extract Passive Hostnames
+
+From a saved scan:
+
+```bash
+python launcher.py discover-hostnames \
+  data/scans/SESSION/SESSION_result.csv \
+  --artifact artifacts/host_discovery_model.json \
+  --output data/scans/SESSION/SESSION_hostnames.csv \
+  --html data/scans/SESSION/SESSION_hostnames_report.html
+```
+
+## 5. Generate Training Data
 
 Balanced synthetic dataset:
 
@@ -71,7 +83,7 @@ python training/generate_synthetic_data.py \
   --seed 7
 ```
 
-## 5. Train Classifier
+## 6. Train Classifier
 
 ```bash
 python training/train.py \
@@ -87,7 +99,7 @@ python training/evaluate.py \
   --artifact artifacts/snn_model.json
 ```
 
-## 6. Train Scanner Strategy Artifact
+## 7. Train Scanner Strategy Artifact
 
 ```bash
 python launcher.py scan-train \
@@ -95,7 +107,18 @@ python launcher.py scan-train \
   --artifact artifacts/scanner_model.json
 ```
 
-## 7. Run A Larger Practical Scan
+## 8. Train Passive Host Discovery Artifact
+
+```bash
+python launcher.py discover-generate \
+  --output data/host_discovery_synthetic.csv
+
+python launcher.py discover-train \
+  --data data/host_discovery_synthetic.csv \
+  --artifact artifacts/host_discovery_model.json
+```
+
+## 9. Run A Larger Practical Scan
 
 ```bash
 python launcher.py scan \
@@ -106,14 +129,14 @@ python launcher.py scan \
   --report artifacts/snn_model.json
 ```
 
-## 8. Verify With Nmap
+## 10. Verify With Nmap
 
 ```bash
 python launcher.py verify-betta-morpho \
   --scan-csv data/scans/SESSION/SESSION_result.csv
 ```
 
-## 9. Compare Two Runs
+## 11. Compare Two Runs
 
 ```bash
 python launcher.py benchmark-scans \
@@ -122,9 +145,10 @@ python launcher.py benchmark-scans \
   --register
 ```
 
-## 10. Where To Go Next
+## 12. Where To Go Next
 
 - [SCANNING_GUIDE.md](SCANNING_GUIDE.md)
 - [TRAINING_GUIDE.md](TRAINING_GUIDE.md)
+- [HOST_DISCOVERY_GUIDE.md](HOST_DISCOVERY_GUIDE.md)
 - [CLI_REFERENCE.md](CLI_REFERENCE.md)
 - [ARCHITECTURE.md](ARCHITECTURE.md)

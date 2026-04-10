@@ -12,7 +12,7 @@
 #
 # Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 # License : Apache-2.0 - see LICENSE
-# Version : 2.3.3
+# Version : 2.4.0
 # Created : 01.04.2026
 # =============================================================================
 """Betta-Morpho SNN scanner CLI facade and reporting pipeline."""
@@ -43,6 +43,7 @@ from training.tools.scanner_probes import discover_hosts, parse_ports, parse_tar
 from training.tools.scanner_support import Panel, Prompt, RICH, SCAPY_AVAILABLE, Table, _C, _print, detect_service, load_service_artifact, RAW_AVAILABLE
 from training.tools.scanner_types import MAX_MANUAL_SPEED_LEVEL, MIN_MANUAL_SPEED_LEVEL, PROFILES, PortResult
 from training.tools.scanner_utils import _normalize_result_text_fields, _shannon_entropy
+from tools.host_discovery import default_artifact_path, discover_from_port_results, export_discovery_csv, export_discovery_html
 from tools.nmap_service_catalog import SERVICE_CATALOG_ENV
 from tools.path_naming import build_report_bundle_paths, build_scan_output_paths, infer_session_prefix
 
@@ -792,10 +793,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="CLASSIFIER_ARTIFACT",
         help=(
             "Auto-pipeline: create output dir with "
-            "YYYYMMDD_HHMMSS_TARGET_result.csv/report.html/classified.csv. "
+            "YYYYMMDD_HHMMSS_TARGET_result.csv/report.html/classified.csv/hostnames.csv. "
             "Use --verify-with-nmap separately if you also want targeted Nmap verification."
         ),
     )
+    scan_cmd.add_argument("--discover-hostnames", action="store_true", help="Run passive hostname discovery from the resulting scan evidence")
+    scan_cmd.add_argument("--host-discovery-artifact", metavar="PATH", help="Optional passive-host-discovery artifact JSON")
+    scan_cmd.add_argument("--host-discovery-output", metavar="PATH", help="Write discovered hostname candidates to PATH")
+    scan_cmd.add_argument("--host-discovery-html", metavar="PATH", help="Write hostname discovery HTML report to PATH")
 
     classify_cmd = subcommands.add_parser("classify-results", help="Load scan CSV and add predicted_label via the SNN classifier")
     classify_cmd.add_argument("--data", required=True, help="Input scan CSV path")
@@ -861,6 +866,9 @@ def main() -> int:
             args.html = str(output_paths["report_html"])
             args.progress_log = str(output_paths["progress_log"])
             args.active_learning_output = str(output_paths["active_learning_csv"])
+            if getattr(args, "discover_hostnames", False):
+                args.host_discovery_output = str(output_paths["hostnames_csv"])
+                args.host_discovery_html = str(output_paths["hostnames_html"])
             _print(f"[bold cyan][Betta-Morpho] Output dir:[/] {report_dir}")
         elif not args.output:
             output_paths = build_scan_output_paths(PROJECT_ROOT / "data" / "scans", args.target)
@@ -873,9 +881,17 @@ def main() -> int:
                 args.progress_log = str(output_paths["progress_log"])
             if not getattr(args, "active_learning_output", None):
                 args.active_learning_output = str(output_paths["active_learning_csv"])
+            if getattr(args, "discover_hostnames", False):
+                args.host_discovery_output = str(output_paths["hostnames_csv"])
+                args.host_discovery_html = str(output_paths["hostnames_html"])
             _print(f"[bold cyan][Betta-Morpho] Output dir:[/] {report_dir}")
         elif not getattr(args, "progress_log", None):
             args.progress_log = str(_session_output_path(args.output, "progress", ".log"))
+        if getattr(args, "discover_hostnames", False):
+            if not getattr(args, "host_discovery_output", None):
+                args.host_discovery_output = str(_session_output_path(args.output, "hostnames", ".csv"))
+            if not getattr(args, "host_discovery_html", None):
+                args.host_discovery_html = str(_session_output_path(args.output, "hostnames_report", ".html"))
 
         targets = parse_targets(args.target)
         ports = parse_ports(args.ports)
@@ -1037,6 +1053,9 @@ def main() -> int:
                 _print(f"  result.csv     : {args.output}")
                 _print(f"  classified.csv : {classified_path}")
                 _print(f"  report.html    : {args.html}")
+                if getattr(args, "discover_hostnames", False):
+                    _print(f"  hostnames.csv  : {args.host_discovery_output}")
+                    _print(f"  hostnames.html : {args.host_discovery_html}")
                 if verification_summary:
                     _print(f"  verify.json    : {verification_summary.get('comparison_json', '')}")
                     _print(f"  verify.csv     : {verification_summary.get('comparison_csv', '')}")
@@ -1061,6 +1080,37 @@ def main() -> int:
                     _print(f"[bold green][Betta-Morpho] Auto-classify:[/] {summary}")
             except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
                 _print(f"[yellow][Betta-Morpho] Auto-classify skipped: {exc}[/]")
+
+        if getattr(args, "discover_hostnames", False):
+            try:
+                discovery_artifact_path: Path | None = None
+                configured_artifact = getattr(args, "host_discovery_artifact", None)
+                if configured_artifact:
+                    candidate = Path(configured_artifact)
+                    if candidate.exists():
+                        discovery_artifact_path = candidate
+                    else:
+                        _print(f"[yellow][Betta-Morpho] Host discovery artifact skipped: not found: {candidate}[/]")
+                else:
+                    default_artifact = default_artifact_path()
+                    if default_artifact.exists():
+                        discovery_artifact_path = default_artifact
+
+                hostname_rows = discover_from_port_results(all_results, artifact_path=discovery_artifact_path)
+                if getattr(args, "host_discovery_output", None):
+                    export_discovery_csv(hostname_rows, Path(args.host_discovery_output))
+                if getattr(args, "host_discovery_html", None):
+                    export_discovery_html(hostname_rows, Path(args.host_discovery_html))
+                counts = Counter(row.get("predicted_label", "") for row in hostname_rows)
+                _print(
+                    "[bold green][Betta-Morpho] host discovery:[/] "
+                    + f"candidates={len(hostname_rows)} "
+                    + f"high_value={counts.get('high_value', 0)} "
+                    + f"supporting={counts.get('supporting', 0)} "
+                    + f"noise={counts.get('noise', 0)}"
+                )
+            except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
+                _print(f"[yellow][Betta-Morpho] Host discovery skipped: {exc}[/]")
 
         try:
             from tools.scan_history import ScanHistory

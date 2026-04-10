@@ -10,11 +10,11 @@
 #
 # Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 # License : Apache-2.0 - see LICENSE
-# Version : 2.3.3
+# Version : 2.4.0
 # Created : 01.04.2026
 # =============================================================================
 
-__version__ = "2.3.3"
+__version__ = "2.4.0"
 __created__ = "01.04.2026"
 __author__ = "Vitalii Khomenko <khomenko.vitalii@pm.me>"
 __license__ = "Apache-2.0"

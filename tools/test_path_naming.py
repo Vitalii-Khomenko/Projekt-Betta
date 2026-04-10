@@ -28,9 +28,17 @@ class PathNamingTests(unittest.TestCase):
         self.assertEqual(bundle["dir"], expected_dir)
         self.assertEqual(bundle["result_csv"], expected_dir / "20260410_121554_127.0.0.1_result.csv")
         self.assertEqual(bundle["classified_csv"], expected_dir / "20260410_121554_127.0.0.1_classified.csv")
+        self.assertEqual(bundle["hostnames_csv"], expected_dir / "20260410_121554_127.0.0.1_hostnames.csv")
+        self.assertEqual(bundle["hostnames_html"], expected_dir / "20260410_121554_127.0.0.1_hostnames_report.html")
 
     def test_infer_session_prefix_handles_session_file_names(self) -> None:
         prefix = infer_session_prefix(Path("data/scans/20260410_121554_127.0.0.1/20260410_121554_127.0.0.1_result.csv"))
+        self.assertEqual(prefix, "20260410_121554_127.0.0.1")
+
+    def test_infer_session_prefix_handles_hostname_reports(self) -> None:
+        prefix = infer_session_prefix(
+            Path("data/scans/20260410_121554_127.0.0.1/20260410_121554_127.0.0.1_hostnames_report.html")
+        )
         self.assertEqual(prefix, "20260410_121554_127.0.0.1")
 
 

@@ -12,6 +12,7 @@ ARTIFACT_SCHEMA_VERSION = 1
 FAMILY_CLASSIFIER = "classifier-snn"
 FAMILY_SCANNER = "scanner-snn"
 FAMILY_SERVICE = "service-fingerprint"
+FAMILY_HOST_DISCOVERY = "host-discovery-snn"
 FAMILY_SERVICE_CATALOG = "service-catalog"
 FAMILY_BENCHMARK = "benchmark-report"
 FAMILY_DEFENSE_DETECTOR = "defense-detector"
@@ -28,6 +29,8 @@ def infer_legacy_family(payload: dict[str, Any]) -> str:
         return FAMILY_SERVICE_CATALOG
     if payload.get("model_type") == "service-fingerprint-naive-bayes":
         return FAMILY_SERVICE
+    if payload.get("model_type") == "passive-host-discovery-snn":
+        return FAMILY_HOST_DISCOVERY
     if payload.get("model_type") == "defense-session-centroid":
         return FAMILY_DEFENSE_DETECTOR
     if "scanner_version" in payload or payload.get("actions"):

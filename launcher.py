@@ -13,6 +13,8 @@ Key commands:
     python launcher.py verify-betta-morpho --scan-csv data/scans/SCAN_DIR/YYYYMMDD_HHMMSS_IP_result.csv
     python launcher.py service-catalog-build --output artifacts/service_catalog.json
     python launcher.py service-train   data/scans --artifact artifacts/service_model.json
+    python launcher.py discover-train  --data data/host_discovery_synthetic.csv --artifact artifacts/host_discovery_model.json
+    python launcher.py discover-hostnames data/scans/SCAN_DIR/YYYYMMDD_HHMMSS_IP_result.csv --output data/scans/SCAN_DIR/YYYYMMDD_HHMMSS_IP_hostnames.csv
     python launcher.py service-classify --input data/scans/SCAN_DIR/YYYYMMDD_HHMMSS_IP_result.csv --artifact artifacts/service_model.json --output result_svc.csv
     python launcher.py benchmark-scans --baseline-csv data/scans/A_result.csv --candidate-csv data/scans/B_result.csv --register
     python launcher.py experiment-list --limit 10
@@ -25,7 +27,7 @@ Output: scan results saved to data/scans/YYYYMMDD_HHMMSS_IP/ with matching YYYYM
 
 Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 License : Apache-2.0 - see LICENSE
-Version : 2.3.3
+Version : 2.4.0
 Created : 01.04.2026
 """
 from __future__ import annotations
@@ -165,7 +167,8 @@ PROJECT_LEARNING_TOPICS = {
         "- classifier model: transport / telemetry classifier\n"
         "- scanner model: probe strategy and pacing\n"
         "- service model: app-layer service labeling\n"
-        "- service catalog: normalization rules and local service hints",
+        "- service catalog: normalization rules and local service hints\n"
+        "- host discovery model: passive hostname/domain ranking from scan evidence",
     ),
     "2": (
         "Models Guide",
@@ -177,7 +180,10 @@ PROJECT_LEARNING_TOPICS = {
         "- Controls how Betta-Morpho scans targets\n\n"
         "Service model:\n"
         "- Learns service fingerprints from past scan outputs\n"
-        "- Helps label services on unusual ports or noisy banners",
+        "- Helps label services on unusual ports or noisy banners\n\n"
+        "Host discovery model:\n"
+        "- Learns to rank hostnames and domains passively exposed by services\n"
+        "- Helps separate high-value names from low-signal noise after a scan",
     ),
     "3": (
         "Scan Profiles",
@@ -211,7 +217,9 @@ PROJECT_LEARNING_TOPICS = {
         "- HTML report\n"
         "- classified CSV\n"
         "- progress log\n"
-        "- active-learning CSV\n\n"
+        "- active-learning CSV\n"
+        "- hostnames CSV\n"
+        "- hostnames HTML report\n\n"
         "Nmap verification is a separate step.\n"
         "You should enable it only when you really want a targeted control pass against Betta-Morpho-open ports.",
     ),
@@ -224,7 +232,9 @@ PROJECT_LEARNING_TOPICS = {
         "- *_report.html\n"
         "- *_classified.csv\n"
         "- *_progress.log\n"
-        "- *_active_learning.csv",
+        "- *_active_learning.csv\n"
+        "- *_hostnames.csv\n"
+        "- *_hostnames_report.html",
     ),
     "7": (
         "Stealth And Evasion Guide",
@@ -308,7 +318,8 @@ def _show_report_guide() -> None:
         "Report Guide",
         "Auto report pipeline:\n"
         "- Best default for most real scans\n"
-        "- Writes a full timestamped scan folder automatically\n\n"
+        "- Writes a full timestamped scan folder automatically\n"
+        "- Can also include passive hostname discovery exports\n\n"
         "Manual output:\n"
         "- Best when you want exact file paths\n"
         "- Good for repeatable experiments or external automation\n\n"
@@ -489,6 +500,14 @@ def _build_scan_args_interactive() -> list[str]:
         if prompt_bool("Run classifier on the result CSV after the scan->", False):
             report_artifact = prompt_text("Classifier artifact", "artifacts/snn_model.json")
 
+    host_discovery_enabled = prompt_bool("Run passive hostname discovery after the scan->", report_mode == "auto_report")
+    host_discovery_artifact_default = "artifacts/host_discovery_model.json" if (ROOT / "artifacts" / "host_discovery_model.json").exists() else ""
+    host_discovery_artifact = ""
+    host_discovery_output = ""
+    host_discovery_html = ""
+    if host_discovery_enabled and prompt_bool("Use the passive host-discovery model artifact for ranking->", bool(host_discovery_artifact_default)):
+        host_discovery_artifact = prompt_text("Host discovery artifact", host_discovery_artifact_default or "artifacts/host_discovery_model.json")
+
     _show_question_hint(
         "Verification And Safety",
         "Nmap verification is separate from Betta-Morpho reporting.\n"
@@ -528,6 +547,9 @@ def _build_scan_args_interactive() -> list[str]:
         if prompt_bool("Write active-learning service rows to a custom file->", False):
             active_learning_output = prompt_text("Active-learning CSV", "data/scans/manual_active_learning.csv")
             active_learning_threshold = prompt_float("Active-learning confidence threshold", 0.65)
+        if host_discovery_enabled and prompt_bool("Write passive hostname discovery files to custom paths->", False):
+            host_discovery_output = prompt_text("Hostname CSV", "data/scans/manual_hostnames.csv")
+            host_discovery_html = prompt_text("Hostname HTML report", "data/scans/manual_hostnames_report.html")
         progress_log = prompt_text("Custom progress log path (blank = auto)", "")
         no_classify = prompt_bool("Skip auto-classification even if a classifier artifact is provided->", False)
 
@@ -553,6 +575,14 @@ def _build_scan_args_interactive() -> list[str]:
             args.extend(["--report", report_artifact])
     if html_path:
         args.extend(["--html", html_path])
+    if host_discovery_enabled:
+        args.append("--discover-hostnames")
+    if host_discovery_artifact:
+        args.extend(["--host-discovery-artifact", host_discovery_artifact])
+    if host_discovery_output:
+        args.extend(["--host-discovery-output", host_discovery_output])
+    if host_discovery_html:
+        args.extend(["--host-discovery-html", host_discovery_html])
     if verify_with_nmap:
         args.append("--verify-with-nmap")
     if transport_mode == "connect":
@@ -611,6 +641,14 @@ def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
         scan_args.extend(["--html", args.html])
     if getattr(args, "report", None):
         scan_args.extend(["--report", args.report])
+    if getattr(args, "discover_hostnames", False):
+        scan_args.append("--discover-hostnames")
+    if getattr(args, "host_discovery_artifact", None):
+        scan_args.extend(["--host-discovery-artifact", args.host_discovery_artifact])
+    if getattr(args, "host_discovery_output", None):
+        scan_args.extend(["--host-discovery-output", args.host_discovery_output])
+    if getattr(args, "host_discovery_html", None):
+        scan_args.extend(["--host-discovery-html", args.host_discovery_html])
     if getattr(args, "verify_with_nmap", False):
         scan_args.append("--verify-with-nmap")
     if getattr(args, "save_weights", None):
@@ -717,6 +755,32 @@ def _guided_service_training() -> tuple[str, str, list[str]]:
     )
 
 
+def _guided_host_discovery_training() -> tuple[str, str, list[str]]:
+    _print_panel(
+        "Passive Host Discovery Training",
+        "This trains the hostname/domain ranking SNN from passive scan evidence.\n"
+        "Use it when you want better prioritization of names extracted from banners, redirects, TLS certs, and other scan-side clues.\n\n"
+        "Hint:\n"
+        "- start with the synthetic dataset if you want a clean baseline\n"
+        "- later retrain from your own curated hostname evidence exports",
+    )
+    data_path = prompt_text("Training CSV for passive host discovery", "data/host_discovery_synthetic.csv")
+    artifact = prompt_text("Host discovery artifact output", "artifacts/host_discovery_model.json")
+    trainer = prompt_text("Trainer backend (auto/prototype/torch)", "auto")
+    epochs = prompt_int("Epochs", 20)
+    return (
+        "Train passive host-discovery SNN",
+        "tools/host_discovery.py",
+        [
+            "train",
+            "--data", data_path,
+            "--artifact", artifact,
+            "--trainer", trainer,
+            "--epochs", str(epochs),
+        ],
+    )
+
+
 def _project_learning_menu() -> int:
     while True:
         _print_panel(
@@ -767,6 +831,7 @@ def _data_tools_menu() -> int:
                 ("4", "Replay dataset directory", "Batch-evaluate many CSV files"),
                 ("5", "Convert PCAP to CSV", "Turn offline packets into project telemetry"),
                 ("6", "Live capture to CSV", "Capture packets live and store telemetry rows"),
+                ("7", "Generate passive host-discovery dataset", "Create synthetic hostname/domain ranking data"),
                 ("0", "Back", "Return to the training menu"),
             ],
             "1",
@@ -832,6 +897,16 @@ def _data_tools_menu() -> int:
             if asset_filter:
                 arguments.extend(["--asset-ip", asset_filter])
             return run_script("training/tools/live_capture_to_csv.py", arguments)
+        if choice == "7":
+            return run_script(
+                "tools/host_discovery.py",
+                [
+                    "generate-synthetic",
+                    "--output", prompt_text("Output CSV", "data/host_discovery_synthetic.csv"),
+                    "--samples-per-class", str(prompt_int("Samples per class", 250)),
+                    "--seed", str(prompt_int("Random seed", 7)),
+                ],
+            )
 
 
 def _model_training_menu() -> int:
@@ -843,17 +918,19 @@ def _model_training_menu() -> int:
             "Practical rule:\n"
             "- classifier = row labeling and classified CSVs\n"
             "- scanner = scan behavior and probe strategy\n"
-            "- service model = better service names in reports",
+            "- service model = better service names in reports\n"
+            "- host discovery model = better hostname/domain ranking after scans",
         )
         choice = _prompt_menu_choice(
             "Model Training Menu",
             [
-                ("1", "Full training pipeline", "Classifier SNN -> scanner SNN -> service model in one guided flow"),
+                ("1", "Full training pipeline", "Classifier SNN -> scanner SNN -> service model -> host discovery model"),
                 ("2", "Train classifier SNN", "Telemetry / transport classification model"),
                 ("3", "Train scanner strategy SNN", "Probe pacing and scan behavior model"),
                 ("4", "Train service-fingerprint model", "Service naming and app-layer enrichment model"),
-                ("5", "Build service catalog", "Rebuild internal normalization catalog from Nmap files"),
-                ("6", "Data preparation tools", "Generate, replay, evaluate, or import datasets"),
+                ("5", "Train passive host-discovery SNN", "Rank discovered hostnames/domains from scan evidence"),
+                ("6", "Build service catalog", "Rebuild internal normalization catalog from Nmap files"),
+                ("7", "Data preparation tools", "Generate, replay, evaluate, or import datasets"),
                 ("0", "Back", "Return to the main launcher"),
             ],
             "1",
@@ -865,6 +942,7 @@ def _model_training_menu() -> int:
                 _guided_classifier_training(),
                 _guided_scanner_training(),
                 _guided_service_training(),
+                _guided_host_discovery_training(),
             ]
             if prompt_bool("Run the full training pipeline now->", True):
                 return _run_steps(steps)
@@ -876,6 +954,8 @@ def _model_training_menu() -> int:
         if choice == "4":
             return _run_steps([_guided_service_training()])
         if choice == "5":
+            return _run_steps([_guided_host_discovery_training()])
+        if choice == "6":
             return run_script(
                 "tools/nmap_service_catalog.py",
                 [
@@ -885,7 +965,7 @@ def _model_training_menu() -> int:
                     "--services", prompt_text("nmap-services path", "/usr/share/nmap/nmap-services"),
                 ],
             )
-        if choice == "6":
+        if choice == "7":
             return _data_tools_menu()
 
 
@@ -905,8 +985,9 @@ def _scanner_launch_menu() -> int:
             [
                 ("1", "Guided scan launch", "Build a scan command with TCP, UDP, transport, report, and verification choices"),
                 ("2", "Verify previous scan with Nmap", "Run Nmap only against Betta-Morpho-open ports from a saved CSV"),
-                ("3", "Run lab services", "Start local lab listeners for scanner practice"),
-                ("4", "Exercise lab traffic", "Generate controlled traffic against local lab services"),
+                ("3", "Passive hostname discovery from saved scan", "Extract and rank hostnames/domains from existing scan results"),
+                ("4", "Run lab services", "Start local lab listeners for scanner practice"),
+                ("5", "Exercise lab traffic", "Generate controlled traffic against local lab services"),
                 ("0", "Back", "Return to the main launcher"),
             ],
             "1",
@@ -926,8 +1007,23 @@ def _scanner_launch_menu() -> int:
                 ],
             )
         if choice == "3":
-            return run_script(LAB_SERVICES_SCRIPT, ["--host", prompt_text("Host", "127.0.0.1")])
+            arguments = [
+                "discover",
+                prompt_text("Input result CSV or directory", "data/scans"),
+                "--output",
+                prompt_text("Hostname output CSV", "data/scans/manual_hostnames.csv"),
+            ]
+            artifact_default = "artifacts/host_discovery_model.json" if (ROOT / "artifacts" / "host_discovery_model.json").exists() else ""
+            if prompt_bool("Use host discovery model artifact for ranking->", bool(artifact_default)):
+                artifact_path = prompt_text("Host discovery artifact", artifact_default or "artifacts/host_discovery_model.json")
+                if artifact_path:
+                    arguments.extend(["--artifact", artifact_path])
+            if prompt_bool("Also write HTML report->", True):
+                arguments.extend(["--html", prompt_text("Hostname HTML report", "data/scans/manual_hostnames_report.html")])
+            return run_script("tools/host_discovery.py", arguments)
         if choice == "4":
+            return run_script(LAB_SERVICES_SCRIPT, ["--host", prompt_text("Host", "127.0.0.1")])
+        if choice == "5":
             return run_script(
                 LAB_EXERCISE_SCRIPT,
                 [
@@ -952,8 +1048,8 @@ def interactive_menu() -> int:
             "Main Workflow Menu",
             [
                 ("1", "Project learning", "Overview of workflow, artifacts, reports, transport, UDP, and verification"),
-                ("2", "Model training", "Train classifier, scanner, service model, or prepare datasets"),
-                ("3", "Scanner launch", "Run guided scans, verify past scans, or use lab helpers"),
+                ("2", "Model training", "Train classifier, scanner, service model, host discovery model, or prepare datasets"),
+                ("3", "Scanner launch", "Run guided scans, verify past scans, discover hostnames, or use lab helpers"),
                 ("0", "Exit", "Close the launcher"),
             ],
             "1",
@@ -1016,6 +1112,35 @@ def build_parser() -> argparse.ArgumentParser:
     replay = subparsers.add_parser("replay-dir", help="Evaluate all CSV files in a directory")
     replay.add_argument("--data-dir", default=DEFAULT_REPLAY_DIR)
     replay.add_argument("--artifact", default="artifacts/snn_model.json")
+
+    discover_generate = subparsers.add_parser("discover-generate", help="Generate synthetic passive hostname-discovery training data")
+    discover_generate.add_argument("--output", default="data/host_discovery_synthetic.csv")
+    discover_generate.add_argument("--samples-per-class", type=int, default=250)
+    discover_generate.add_argument("--seed", type=int, default=7)
+
+    discover_train = subparsers.add_parser("discover-train", help="Train the passive hostname-discovery SNN artifact")
+    discover_train.add_argument("--data", default="data/host_discovery_synthetic.csv")
+    discover_train.add_argument("--artifact", default="artifacts/host_discovery_model.json")
+    discover_train.add_argument("--trainer", choices=["auto", "prototype", "torch"], default="auto")
+    discover_train.add_argument("--epochs", type=int, default=20)
+    discover_train.add_argument("--steps", type=int, default=12)
+    discover_train.add_argument("--hidden-dim", type=int, default=12)
+    discover_train.add_argument("--batch-size", type=int, default=64)
+    discover_train.add_argument("--learning-rate", type=float, default=0.01)
+    discover_train.add_argument("--beta", type=float, default=0.82)
+    discover_train.add_argument("--threshold", type=float, default=1.0)
+    discover_train.add_argument("--seed", type=int, default=7)
+
+    discover_evaluate = subparsers.add_parser("discover-evaluate", help="Evaluate the passive hostname-discovery artifact")
+    discover_evaluate.add_argument("--data", default="data/host_discovery_synthetic.csv")
+    discover_evaluate.add_argument("--artifact", default="artifacts/host_discovery_model.json")
+    discover_evaluate.add_argument("--preview", type=int, default=5)
+
+    discover_hostnames = subparsers.add_parser("discover-hostnames", help="Extract passive hostname/domain candidates from saved scan CSVs")
+    discover_hostnames.add_argument("inputs", nargs="+", help="Result CSV files or directories")
+    discover_hostnames.add_argument("--artifact", default=None)
+    discover_hostnames.add_argument("--output", required=True)
+    discover_hostnames.add_argument("--html", default=None)
 
     pcap = subparsers.add_parser("pcap-to-csv", help="Convert offline PCAP traffic to telemetry CSV")
     pcap.add_argument("--pcap", required=True)
@@ -1088,6 +1213,14 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Optional HTML report path")
     scan.add_argument("--report", default=None,
                       help="Auto report pipeline using the provided classifier artifact")
+    scan.add_argument("--discover-hostnames", action="store_true",
+                      help="Run passive hostname discovery from resulting scan evidence")
+    scan.add_argument("--host-discovery-artifact", default=None,
+                      help="Optional passive hostname-discovery artifact JSON")
+    scan.add_argument("--host-discovery-output", default=None,
+                      help="Write discovered hostname candidates to PATH")
+    scan.add_argument("--host-discovery-html", default=None,
+                      help="Write hostname discovery HTML report to PATH")
     scan.add_argument("--verify-with-nmap", action="store_true",
                       help="Run targeted Nmap verification after the scan")
     scan.add_argument("--save-weights", default=None,
@@ -1292,6 +1425,83 @@ def main() -> None:
                 ],
             )
         )
+
+    if args.command == "discover-generate":
+        raise SystemExit(
+            run_script(
+                "tools/host_discovery.py",
+                [
+                    "generate-synthetic",
+                    "--output",
+                    args.output,
+                    "--samples-per-class",
+                    str(args.samples_per_class),
+                    "--seed",
+                    str(args.seed),
+                ],
+            )
+        )
+
+    if args.command == "discover-train":
+        raise SystemExit(
+            run_script(
+                "tools/host_discovery.py",
+                [
+                    "train",
+                    "--data",
+                    args.data,
+                    "--artifact",
+                    args.artifact,
+                    "--trainer",
+                    args.trainer,
+                    "--epochs",
+                    str(args.epochs),
+                    "--steps",
+                    str(args.steps),
+                    "--hidden-dim",
+                    str(args.hidden_dim),
+                    "--batch-size",
+                    str(args.batch_size),
+                    "--learning-rate",
+                    str(args.learning_rate),
+                    "--beta",
+                    str(args.beta),
+                    "--threshold",
+                    str(args.threshold),
+                    "--seed",
+                    str(args.seed),
+                ],
+            )
+        )
+
+    if args.command == "discover-evaluate":
+        raise SystemExit(
+            run_script(
+                "tools/host_discovery.py",
+                [
+                    "evaluate",
+                    "--data",
+                    args.data,
+                    "--artifact",
+                    args.artifact,
+                    "--preview",
+                    str(args.preview),
+                ],
+            )
+        )
+
+    if args.command == "discover-hostnames":
+        discover_args = [
+            "discover",
+            *args.inputs,
+            "--output",
+            args.output,
+        ]
+        if args.artifact:
+            discover_args.extend(["--artifact", args.artifact])
+        if args.html:
+            discover_args.extend(["--html", args.html])
+        raise SystemExit(run_script("tools/host_discovery.py", discover_args))
 
     if args.command == "pcap-to-csv":
         arguments = [

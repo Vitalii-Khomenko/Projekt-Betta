@@ -64,6 +64,16 @@ Typical path:
 
 - `artifacts/service_catalog.json`
 
+### Passive Host Discovery Artifact
+
+Purpose:
+
+- rank hostnames and domains extracted passively from existing scan evidence
+
+Typical path:
+
+- `artifacts/host_discovery_model.json`
+
 ### Benchmark Manifest
 
 Purpose:
@@ -82,9 +92,10 @@ Typical workflow:
 2. train classifier or scanner artifacts
 3. run scan
 4. enrich services and export reports
-5. optionally verify with Nmap
-6. compare runs with benchmarks
-7. register results in the experiment registry
+5. optionally extract and rank passive hostname/domain candidates
+6. optionally verify with Nmap
+7. compare runs with benchmarks
+8. register results in the experiment registry
 
 ## Data Schema
 
@@ -113,6 +124,11 @@ Main CSV fields:
 
 Classifier training mainly uses the original telemetry fields.
 Enrichment fields are most useful for reports, service modeling, and later research loops.
+
+Additional passive-host-discovery outputs:
+
+- `*_hostnames.csv`
+- `*_hostnames_report.html`
 
 ## Profiles And Speeds
 

@@ -29,7 +29,7 @@ _POP3_PORTS = {110, 995}
 _IMAP_PORTS = {143, 993}
 _SMB_PORTS = {139, 445}
 _REDIS_PORTS = {6379, 6380}
-_TITLE_RE = re.compile(r"<title[^>]*>(.*->)</title>", re.IGNORECASE | re.DOTALL)
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _CURL_BIN = shutil.which("curl")
 _GENERIC_SERVICE_NAMES = {"ftp", "smtp", "http", "https", "pop3", "imap", "smb", "ssh", "dns"}
 _SMB_DIALECT_NAMES = {
@@ -117,17 +117,20 @@ def _curl_http_probe(host: str, port: int, scheme: str, timeout: float = 4.0) ->
             status = match.group(1)
 
     server = ""
+    location = ""
     for line in header_lines[1:]:
         if line.lower().startswith("server:"):
             server = line.split(":", 1)[1].strip()
-            break
+            continue
+        if line.lower().startswith("location:"):
+            location = line.split(":", 1)[1].strip()
 
     title = ""
     title_match = _TITLE_RE.search(body[:4096])
     if title_match:
         title = _clean_probe_text(title_match.group(1), limit=80)
 
-    if not any((status, server, title)):
+    if not any((status, server, title, location)):
         return {}
 
     return {
@@ -135,6 +138,7 @@ def _curl_http_probe(host: str, port: int, scheme: str, timeout: float = 4.0) ->
         "status": status,
         "server": _clean_probe_text(server, limit=120),
         "title": title,
+        "location": _clean_probe_text(location, limit=180),
     }
 
 
@@ -204,6 +208,14 @@ def _probe_tls_certificate(host: str, port: int, timeout: float = 3.0) -> dict[s
     return {
         "subject": _clean_probe_text(_flatten_name(cert.get("subject", [])), limit=100),
         "issuer": _clean_probe_text(_flatten_name(cert.get("issuer", [])), limit=100),
+        "san": _clean_probe_text(
+            ", ".join(
+                str(item[1]).strip()
+                for item in cert.get("subjectAltName", [])
+                if isinstance(item, tuple) and len(item) == 2 and str(item[0]).lower() == "dns"
+            )[:180],
+            limit=180,
+        ),
         "tls_version": _clean_probe_text(tls_version, limit=40),
         "cipher": _clean_probe_text(str(cipher_info[0] or ""), limit=80),
     }
@@ -490,6 +502,8 @@ def enrich_port_results(results: list[PortResult], service_artifact: dict | None
                     summary_parts.append(http_data["server"])
                 if http_data.get("title"):
                     summary_parts.append(f"title={http_data['title']}")
+                if http_data.get("location"):
+                    summary_parts.append(f"location={http_data['location']}")
                 result.technology = _clean_probe_text(" | ".join(summary_parts), limit=180)
                 if not result.banner and summary_parts:
                     result.banner = _clean_probe_text(" | ".join(summary_parts), limit=120)
@@ -508,13 +522,14 @@ def enrich_port_results(results: list[PortResult], service_artifact: dict | None
 
         if result.port in _TLS_PORTS or result.service in {"HTTPS", "IMAPS", "POP3S"}:
             cert = _probe_tls_certificate(result.host, result.port)
-            if cert.get("subject") or cert.get("issuer") or cert.get("tls_version") or cert.get("cipher"):
+            if cert.get("subject") or cert.get("issuer") or cert.get("san") or cert.get("tls_version") or cert.get("cipher"):
                 cert_summary = " | ".join(
                     part
                     for part in (
                         f"tls={cert['tls_version']}" if cert.get("tls_version") else "",
                         f"cipher={cert['cipher']}" if cert.get("cipher") else "",
                         f"cert={cert['subject']}" if cert.get("subject") else "",
+                        f"san={cert['san']}" if cert.get("san") else "",
                         f"issuer={cert['issuer']}" if cert.get("issuer") else "",
                     )
                     if part

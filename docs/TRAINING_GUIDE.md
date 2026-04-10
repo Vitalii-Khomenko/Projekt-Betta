@@ -10,6 +10,7 @@ Betta-Morpho uses separate artifact families:
 - scanner strategy artifact
 - service fingerprint artifact
 - service catalog artifact
+- passive host discovery artifact
 
 Do not treat them as one interchangeable model.
 
@@ -151,6 +152,32 @@ python launcher.py service-evaluate data/scans \
   --service-catalog artifacts/service_catalog.json
 ```
 
+## Passive Host Discovery Model Training
+
+Generate a synthetic baseline dataset:
+
+```bash
+python launcher.py discover-generate \
+  --output data/host_discovery_synthetic.csv \
+  --samples-per-class 250
+```
+
+Train:
+
+```bash
+python launcher.py discover-train \
+  --data data/host_discovery_synthetic.csv \
+  --artifact artifacts/host_discovery_model.json
+```
+
+Evaluate:
+
+```bash
+python launcher.py discover-evaluate \
+  --data data/host_discovery_synthetic.csv \
+  --artifact artifacts/host_discovery_model.json
+```
+
 ## Benchmark And Registry Layer
 
 Compare two runs:
@@ -179,3 +206,4 @@ python launcher.py domain-summary
 - [SCANNING_GUIDE.md](SCANNING_GUIDE.md)
 - [CLI_REFERENCE.md](CLI_REFERENCE.md)
 - [ARCHITECTURE.md](ARCHITECTURE.md)
+- [HOST_DISCOVERY_GUIDE.md](HOST_DISCOVERY_GUIDE.md)

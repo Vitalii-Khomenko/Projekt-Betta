@@ -2,7 +2,7 @@
 # pyproject.toml  -  Packaging metadata and build configuration for Betta-Morpho
 # Author : Vitalii Khomenko <khomenko.vitalii@pm.me>
 # License: Apache-2.0
-# Version : 2.3.3
+# Version : 2.4.0
 # =============================================================================
 [build-system]
 requires = ["setuptools>=69", "wheel"]
@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "betta-morpho"
-version = "2.3.3"
+version = "2.4.0"
 description = "Betta-Morpho neuromorphic adaptive scanner and telemetry tooling"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -49,7 +49,8 @@ betta-morpho-verify = "tools.verify_scan:main"
 [tool.setuptools]
 include-package-data = true
 py-modules = ["launcher"]
-packages = ["training", "training.tools", "tools", "snn_cyber"]
+packages = ["training", "training.tools", "tools", "snn_cyber", "snn_host_discovery"]
 
 [tool.setuptools.package-dir]
 snn_cyber = "training/src/snn_cyber"
+snn_host_discovery = "training/src/snn_host_discovery"
