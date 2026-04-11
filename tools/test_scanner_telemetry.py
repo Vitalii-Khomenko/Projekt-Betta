@@ -10,7 +10,7 @@ Key commands:
 
 Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 License : Apache-2.0 - see LICENSE
-Version : 2.3.3
+Version : 2.3.4
 Created : 01.04.2026
 """
 from __future__ import annotations
@@ -20,12 +20,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from training.tools.scanner_enrichment import export_active_learning_rows
+from training.tools.scanner import export_html
 from training.tools.scanner_types import PortResult
 from training.tools.scanner_utils import _shannon_entropy
 
@@ -92,6 +94,27 @@ class ScannerTelemetryTests(unittest.TestCase):
         self.assertEqual(exported[0]["service"], "HTTP")
         self.assertEqual(exported[0]["service_prediction"], "Apache httpd")
         self.assertEqual(exported[0]["tcp_window"], "64240")
+
+    def test_export_html_skips_service_detection_for_non_open_rows_without_banners(self) -> None:
+        rows = [
+            PortResult(
+                host="10.0.0.4",
+                port=49152,
+                state="filtered",
+                protocol="tcp",
+                protocol_flag="TIMEOUT",
+                rtt_us=1_000_000.0,
+                payload_size=0,
+                timestamp_us=4,
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "report.html"
+            with patch("training.tools.scanner.detect_service", side_effect=AssertionError("detect_service should not run")):
+                export_html(rows, output, announce=False)
+
+            self.assertTrue(output.exists())
 
 
 if __name__ == "__main__":

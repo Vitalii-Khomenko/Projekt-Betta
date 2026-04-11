@@ -27,7 +27,7 @@ Output: scan results saved to data/scans/YYYYMMDD_HHMMSS_IP/ with matching YYYYM
 
 Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 License : Apache-2.0 - see LICENSE
-Version : 2.4.0
+Version : 2.4.1
 Created : 01.04.2026
 """
 from __future__ import annotations
@@ -78,7 +78,11 @@ def run_script(script: str, arguments: list[str]) -> int:
     if not script_path.exists():
         print(f"ERROR: script not found: {script_path}")
         return 1
-    return subprocess.call([preferred_python(), str(script_path)] + arguments, cwd=ROOT)
+    try:
+        return subprocess.call([preferred_python(), str(script_path)] + arguments, cwd=ROOT)
+    except KeyboardInterrupt:
+        print(f"Interrupted: {script}")
+        return 130
 
 
 def prompt_text(label: str, default: str) -> str:
@@ -405,6 +409,9 @@ def _run_steps(steps: list[tuple[str, str, list[str]]]) -> int:
     for title, script, arguments in steps:
         _print_panel("Running Step", f"{title}\n\nCommand:\n{preferred_python()} {script} {' '.join(arguments)}")
         code = run_script(script, arguments)
+        if code == 130:
+            print(f"Step interrupted: {title}")
+            return code
         if code != 0:
             print(f"Step failed: {title} (exit={code})")
             return code
@@ -1712,4 +1719,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Betta-Morpho launcher interrupted by user.")
+        raise SystemExit(130)

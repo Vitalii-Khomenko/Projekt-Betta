@@ -12,7 +12,7 @@ Key commands:
 
 Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 License : Apache-2.0 - see LICENSE
-Version : 2.3.4
+Version : 2.3.5
 Created : 01.04.2026
 """
 from __future__ import annotations
@@ -270,6 +270,7 @@ def build_catalog(
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
     load_catalog.cache_clear()
+    load_port_index.cache_clear()
     return payload
 
 
@@ -327,6 +328,45 @@ def lookup_product(
     return {}
 
 
+def _service_name_from_entry(entry: dict[str, object]) -> str:
+    service_names = entry.get("service_names")
+    if isinstance(service_names, list):
+        candidates = [_clean_catalog_text(str(item)) for item in service_names if _clean_catalog_text(str(item))]
+        if candidates:
+            return candidates[0]
+    return _clean_catalog_text(str(entry.get("product", "")))
+
+
+@lru_cache(maxsize=8)
+def load_port_index(
+    catalog_path: str | Path | None = None,
+    services_path: str | Path = DEFAULT_SERVICES_PATH,
+) -> dict[str, dict[str, object]]:
+    catalog = load_catalog(catalog_path, services_path)
+    index: dict[str, dict[str, object]] = {}
+    ranks: dict[str, tuple[int, str]] = {}
+
+    for value in catalog.values():
+        ports = value.get("ports")
+        if not isinstance(ports, list):
+            continue
+
+        service_name = _service_name_from_entry(value)
+        if not service_name:
+            continue
+
+        entry = dict(value)
+        entry["service_name"] = service_name
+        rank = (len(service_name), service_name.lower())
+        for port_key in {str(item).strip().lower() for item in ports if str(item).strip()}:
+            current_rank = ranks.get(port_key)
+            if current_rank is None or rank < current_rank:
+                ranks[port_key] = rank
+                index[port_key] = entry
+
+    return index
+
+
 def lookup_service_by_port(
     port: int,
     protocol: str = "tcp",
@@ -340,34 +380,9 @@ def lookup_service_by_port(
     if not protocol_name:
         return {}
 
-    catalog = load_catalog(catalog_path, services_path)
     port_key = f"{int(port)}/{protocol_name}"
-    matches: list[tuple[int, str, dict[str, object]]] = []
-    for value in catalog.values():
-        ports = value.get("ports")
-        if not isinstance(ports, list):
-            continue
-        if port_key not in {str(item).strip().lower() for item in ports if str(item).strip()}:
-            continue
-
-        service_names = value.get("service_names")
-        if isinstance(service_names, list):
-            candidates = [_clean_catalog_text(str(item)) for item in service_names if _clean_catalog_text(str(item))]
-        else:
-            candidates = []
-        service_name = candidates[0] if candidates else _clean_catalog_text(str(value.get("product", "")))
-        if not service_name:
-            continue
-
-        entry = dict(value)
-        entry["service_name"] = service_name
-        matches.append((len(service_name), service_name.lower(), entry))
-
-    if not matches:
-        return {}
-
-    matches.sort(key=lambda item: (item[0], item[1]))
-    return matches[0][2]
+    index = load_port_index(catalog_path, services_path)
+    return dict(index.get(port_key, {}))
 
 
 def build_parser() -> argparse.ArgumentParser:

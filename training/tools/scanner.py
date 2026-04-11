@@ -12,7 +12,7 @@
 #
 # Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 # License : Apache-2.0 - see LICENSE
-# Version : 2.4.1
+# Version : 2.4.2
 # Created : 01.04.2026
 # =============================================================================
 """Betta-Morpho SNN scanner CLI facade and reporting pipeline."""
@@ -287,8 +287,11 @@ def export_html(
         if not os_hint_value and state == "open":
             os_hint_value = verified_host_os_hint
         os_hint = _html.escape(os_hint_value)
-        detected = detect_service(result.port, banner=result.banner)
-        normalized_service = result.service_version or result.service or detected.get("display") or _WELL_KNOWN.get(result.port, "")
+        normalized_service = result.service_version or result.service
+        if not normalized_service and (state == "open" or bool(result.banner)):
+            normalized_service = detect_service(result.port, banner=result.banner).get("display", "")
+        if not normalized_service:
+            normalized_service = _WELL_KNOWN.get(result.port, "")
         verify_service_raw = str(verify_row.get("nmap_service", ""))
         verify_service_normalized = str(verify_row.get("normalized_nmap_service", ""))
         verify_service = _html.escape(verify_service_normalized or verify_service_raw)
@@ -516,6 +519,26 @@ class ScanCheckpointWriter:
         _print(
             f"[dim][Betta-Morpho] Scan elapsed:[/] {_format_elapsed(elapsed)}"
             + (f"  checkpoints={self._checkpoint_count}" if self.enabled else "")
+        )
+
+    def abort(self, total_results: int | None = None) -> None:
+        elapsed = time.monotonic() - self._started_perf
+        recorded_rows = max(self._written_rows, total_results or 0)
+        self._append_log(
+            "SCAN_ABORT",
+            {
+                "elapsed": _format_elapsed(elapsed),
+                "elapsed_seconds": round(elapsed, 1),
+                "checkpoint_count": self._checkpoint_count,
+                "written_rows": self._written_rows,
+                "result_rows": recorded_rows,
+                "reason": "KeyboardInterrupt",
+            },
+        )
+        _print(
+            f"[yellow][Betta-Morpho] Scan interrupted by user.[/] {_format_elapsed(elapsed)}"
+            + (f"  checkpoints={self._checkpoint_count}" if self.enabled else "")
+            + (f"  saved_rows={recorded_rows}" if recorded_rows else "")
         )
 
     def _append_log(self, tag: str, fields: dict[str, object]) -> None:
@@ -948,193 +971,196 @@ def main() -> int:
             checkpoint_every=int(getattr(args, "checkpoint_every", 1000)),
             total_ports=len(ports),
         )
-        progress_writer.start(args.target, args.profile, len(targets))
-
-        if not args.no_discovery and len(targets) > 1:
-            targets = discover_hosts(targets, timeout=2.0)
-            if not targets:
-                _print("[yellow]No live hosts.[/]")
-                progress_writer.finish(0)
-                return 0
-
         all_results: list[PortResult] = []
-        total_hosts = len(targets)
-        for index, host in enumerate(targets, start=1):
-            if total_hosts > 1:
-                _print(f"\n[bold cyan][Betta-Morpho] scanning[/] {host} ({index}/{total_hosts})")
-            else:
-                _print(f"\n[bold cyan]SNN scanning[/] {host} ...")
-
-            def _checkpoint(scanned_ports: int, total_ports: int, partial_results: list[PortResult]) -> None:
-                if total_ports <= 0:
-                    return
-                progress_writer.checkpoint(host, scanned_ports, all_results + partial_results)
-
-            host_results = engine.scan(
-                host,
-                ports,
-                decoys=decoys,
-                spoof_ttl=args.spoof_ttl,
-                jitter_ms=args.jitter_ms,
-                force_connect=args.connect_only,
-                source_port=args.source_port,
-                checkpoint_interval=int(getattr(args, "checkpoint_every", 1000)),
-                progress_callback=_checkpoint,
-            )
-            if udp_ports:
-                _print(f"[dim]  UDP pass: {len(udp_ports)} ports ...[/]")
-                for udp_port in udp_ports:
-                    if RAW_AVAILABLE and not args.connect_only:
-                        host_results.append(udp_probe(host, udp_port, engine.profile))
-                    else:
-                        host_results.append(udp_connect_probe(host, udp_port, timeout=engine.profile.probe_timeout, source_port=args.source_port))
-            if args.retry_source_port is not None:
-                _print(f"[dim]  Source-port retry: filtered TCP ports via {args.retry_source_port} ...[/]")
-                retried_count, changed_count = retry_filtered_tcp_with_source_port(
-                    host,
-                    host_results,
-                    timeout=engine.profile.probe_timeout,
-                    source_port=args.retry_source_port,
-                )
-                _print(f"[dim]    retried={retried_count} changed={changed_count}[/]")
-
-            enrich_port_results(host_results, service_artifact=service_artifact)
-            all_results.extend(host_results)
-            display_results(host_results)
-            if args.jitter_ms and index < total_hosts:
-                time.sleep(random.uniform(0, args.jitter_ms / 1000.0))
-
-        if args.output:
-            export_csv(all_results, Path(args.output))
-
-        if service_artifact and getattr(args, "active_learning_output", None):
-            try:
-                export_active_learning_rows(all_results, Path(args.active_learning_output), threshold=float(args.active_learning_threshold))
-            except (OSError, ValueError) as exc:
-                _print(f"[yellow][Betta-Morpho] Active learning export skipped: {exc}[/]")
-
-        should_verify_with_nmap = bool(getattr(args, "verify_with_nmap", False))
-        if should_verify_with_nmap:
-            if args.output:
-                try:
-                    import shutil
-
-                    if shutil.which("nmap") is None:
-                        _print("[yellow][Betta-Morpho] Nmap verification skipped: nmap not installed.[/]")
-                    else:
-                        from tools.verify_scan import verify_betta_morpho_csv
-
-                        verification_summary = verify_betta_morpho_csv(
-                            scan_csv=Path(args.output),
-                            target=targets[0] if targets else args.target,
-                            service_catalog=args.service_catalog,
-                        )
-                        _print(
-                            "[bold green][Betta-Morpho] Nmap verify:[/] "
-                            + f"matched={len(verification_summary.get('matched_ports', []))} "
-                            + f"betta_only={len(verification_summary.get('betta_morpho_only_ports', []))} "
-                            + f"nmap_only={len(verification_summary.get('nmap_only_ports', []))}"
-                        )
-                except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError) as exc:
-                    _print(f"[yellow][Betta-Morpho] Nmap verification skipped: {exc}[/]")
-            else:
-                _print("[yellow][Betta-Morpho] Nmap verification skipped: requires --output or --report.[/]")
-
-        if getattr(args, "html", None):
-            export_html(all_results, Path(args.html), verification_summary=verification_summary)
-
-        if getattr(args, "save_weights", None):
-            engine.save_artifact(Path(args.save_weights))
-
-        if report_classifier and report_classifier.exists() and args.output:
-            try:
-                classified_path = _session_output_path(args.output, "classified", ".csv")
-                _do_classify(Path(args.output), report_classifier, classified_path)
-                with classified_path.open(encoding="utf-8", newline="") as handle:
-                    counts = Counter(
-                        row.get("predicted_label", "")
-                        for row in csv.DictReader(handle)
-                        if row.get("protocol_flag") == "SYN_ACK"
-                    )
-                _print(f"[bold green][Betta-Morpho] classified:[/] " + "  ".join(f"{label}={count}" for label, count in sorted(counts.items())))
-                _print("[bold cyan][Betta-Morpho] Report files:[/]")
-                _print(f"  result.csv     : {args.output}")
-                _print(f"  classified.csv : {classified_path}")
-                _print(f"  report.html    : {args.html}")
-                if getattr(args, "discover_hostnames", False):
-                    _print(f"  hostnames.csv  : {args.host_discovery_output}")
-                    _print(f"  hostnames.html : {args.host_discovery_html}")
-                if verification_summary:
-                    _print(f"  verify.json    : {verification_summary.get('comparison_json', '')}")
-                    _print(f"  verify.csv     : {verification_summary.get('comparison_csv', '')}")
-            except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
-                _print(f"[yellow]classify step skipped: {exc}[/]")
-
-        if args.output and artifact and not getattr(args, "no_classify", False):
-            try:
-                with artifact.open(encoding="utf-8") as handle:
-                    artifact_payload = json.load(handle)
-                if "input_layer" in artifact_payload:
-                    classified_path = _session_output_path(args.output, "classified", ".csv")
-                    _do_classify(Path(args.output), artifact, classified_path)
-                    with classified_path.open(encoding="utf-8", newline="") as handle:
-                        rows = list(csv.DictReader(handle))
-                    predicted_counts = Counter(
-                        row.get("predicted_label", "")
-                        for row in rows
-                        if row.get("protocol_flag") == "SYN_ACK"
-                    )
-                    summary = "  ".join(f"{label}={count}" for label, count in sorted(predicted_counts.items()))
-                    _print(f"[bold green][Betta-Morpho] Auto-classify:[/] {summary}")
-            except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
-                _print(f"[yellow][Betta-Morpho] Auto-classify skipped: {exc}[/]")
-
-        if getattr(args, "discover_hostnames", False):
-            try:
-                discovery_artifact_path: Path | None = None
-                configured_artifact = getattr(args, "host_discovery_artifact", None)
-                if configured_artifact:
-                    candidate = Path(configured_artifact)
-                    if candidate.exists():
-                        discovery_artifact_path = candidate
-                    else:
-                        _print(f"[yellow][Betta-Morpho] Host discovery artifact skipped: not found: {candidate}[/]")
-                else:
-                    default_artifact = default_artifact_path()
-                    if default_artifact.exists():
-                        discovery_artifact_path = default_artifact
-
-                hostname_rows = discover_from_port_results(all_results, artifact_path=discovery_artifact_path)
-                if getattr(args, "host_discovery_output", None):
-                    export_discovery_csv(hostname_rows, Path(args.host_discovery_output))
-                if getattr(args, "host_discovery_html", None):
-                    export_discovery_html(hostname_rows, Path(args.host_discovery_html))
-                counts = Counter(row.get("predicted_label", "") for row in hostname_rows)
-                _print(
-                    "[bold green][Betta-Morpho] host discovery:[/] "
-                    + f"candidates={len(hostname_rows)} "
-                    + f"high_value={counts.get('high_value', 0)} "
-                    + f"supporting={counts.get('supporting', 0)} "
-                    + f"noise={counts.get('noise', 0)}"
-                )
-            except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
-                _print(f"[yellow][Betta-Morpho] Host discovery skipped: {exc}[/]")
-
         try:
-            from tools.scan_history import ScanHistory
+            progress_writer.start(args.target, args.profile, len(targets))
 
-            scan_id = ScanHistory(str(PROJECT_ROOT / "data" / "scan_history.db")).save_scan(
-                targets[0] if targets else args.target,
-                args.profile,
-                all_results,
-            )
-            _print(f"[dim]Saved to scan history (scan #{scan_id})[/]")
-        except (ImportError, OSError, sqlite3.Error, ValueError) as exc:
-            _print(f"[yellow][Betta-Morpho] Scan history skipped: {exc}[/]")
+            if not args.no_discovery and len(targets) > 1:
+                targets = discover_hosts(targets, timeout=2.0)
+                if not targets:
+                    _print("[yellow]No live hosts.[/]")
+                    progress_writer.finish(0)
+                    return 0
 
-        progress_writer.finish(len(all_results))
+            total_hosts = len(targets)
+            for index, host in enumerate(targets, start=1):
+                if total_hosts > 1:
+                    _print(f"\n[bold cyan][Betta-Morpho] scanning[/] {host} ({index}/{total_hosts})")
+                else:
+                    _print(f"\n[bold cyan]SNN scanning[/] {host} ...")
 
-        return 0
+                def _checkpoint(scanned_ports: int, total_ports: int, partial_results: list[PortResult]) -> None:
+                    if total_ports <= 0:
+                        return
+                    progress_writer.checkpoint(host, scanned_ports, all_results + partial_results)
+
+                host_results = engine.scan(
+                    host,
+                    ports,
+                    decoys=decoys,
+                    spoof_ttl=args.spoof_ttl,
+                    jitter_ms=args.jitter_ms,
+                    force_connect=args.connect_only,
+                    source_port=args.source_port,
+                    checkpoint_interval=int(getattr(args, "checkpoint_every", 1000)),
+                    progress_callback=_checkpoint,
+                )
+                if udp_ports:
+                    _print(f"[dim]  UDP pass: {len(udp_ports)} ports ...[/]")
+                    for udp_port in udp_ports:
+                        if RAW_AVAILABLE and not args.connect_only:
+                            host_results.append(udp_probe(host, udp_port, engine.profile))
+                        else:
+                            host_results.append(udp_connect_probe(host, udp_port, timeout=engine.profile.probe_timeout, source_port=args.source_port))
+                if args.retry_source_port is not None:
+                    _print(f"[dim]  Source-port retry: filtered TCP ports via {args.retry_source_port} ...[/]")
+                    retried_count, changed_count = retry_filtered_tcp_with_source_port(
+                        host,
+                        host_results,
+                        timeout=engine.profile.probe_timeout,
+                        source_port=args.retry_source_port,
+                    )
+                    _print(f"[dim]    retried={retried_count} changed={changed_count}[/]")
+
+                enrich_port_results(host_results, service_artifact=service_artifact)
+                all_results.extend(host_results)
+                display_results(host_results)
+                if args.jitter_ms and index < total_hosts:
+                    time.sleep(random.uniform(0, args.jitter_ms / 1000.0))
+
+            if args.output:
+                export_csv(all_results, Path(args.output))
+
+            if service_artifact and getattr(args, "active_learning_output", None):
+                try:
+                    export_active_learning_rows(all_results, Path(args.active_learning_output), threshold=float(args.active_learning_threshold))
+                except (OSError, ValueError) as exc:
+                    _print(f"[yellow][Betta-Morpho] Active learning export skipped: {exc}[/]")
+
+            should_verify_with_nmap = bool(getattr(args, "verify_with_nmap", False))
+            if should_verify_with_nmap:
+                if args.output:
+                    try:
+                        import shutil
+
+                        if shutil.which("nmap") is None:
+                            _print("[yellow][Betta-Morpho] Nmap verification skipped: nmap not installed.[/]")
+                        else:
+                            from tools.verify_scan import verify_betta_morpho_csv
+
+                            verification_summary = verify_betta_morpho_csv(
+                                scan_csv=Path(args.output),
+                                target=targets[0] if targets else args.target,
+                                service_catalog=args.service_catalog,
+                            )
+                            _print(
+                                "[bold green][Betta-Morpho] Nmap verify:[/] "
+                                + f"matched={len(verification_summary.get('matched_ports', []))} "
+                                + f"betta_only={len(verification_summary.get('betta_morpho_only_ports', []))} "
+                                + f"nmap_only={len(verification_summary.get('nmap_only_ports', []))}"
+                            )
+                    except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError) as exc:
+                        _print(f"[yellow][Betta-Morpho] Nmap verification skipped: {exc}[/]")
+                else:
+                    _print("[yellow][Betta-Morpho] Nmap verification skipped: requires --output or --report.[/]")
+
+            if getattr(args, "html", None):
+                export_html(all_results, Path(args.html), verification_summary=verification_summary)
+
+            if getattr(args, "save_weights", None):
+                engine.save_artifact(Path(args.save_weights))
+
+            if report_classifier and report_classifier.exists() and args.output:
+                try:
+                    classified_path = _session_output_path(args.output, "classified", ".csv")
+                    _do_classify(Path(args.output), report_classifier, classified_path)
+                    with classified_path.open(encoding="utf-8", newline="") as handle:
+                        counts = Counter(
+                            row.get("predicted_label", "")
+                            for row in csv.DictReader(handle)
+                            if row.get("protocol_flag") == "SYN_ACK"
+                        )
+                    _print(f"[bold green][Betta-Morpho] classified:[/] " + "  ".join(f"{label}={count}" for label, count in sorted(counts.items())))
+                    _print("[bold cyan][Betta-Morpho] Report files:[/]")
+                    _print(f"  result.csv     : {args.output}")
+                    _print(f"  classified.csv : {classified_path}")
+                    _print(f"  report.html    : {args.html}")
+                    if getattr(args, "discover_hostnames", False):
+                        _print(f"  hostnames.csv  : {args.host_discovery_output}")
+                        _print(f"  hostnames.html : {args.host_discovery_html}")
+                    if verification_summary:
+                        _print(f"  verify.json    : {verification_summary.get('comparison_json', '')}")
+                        _print(f"  verify.csv     : {verification_summary.get('comparison_csv', '')}")
+                except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
+                    _print(f"[yellow]classify step skipped: {exc}[/]")
+
+            if args.output and artifact and not getattr(args, "no_classify", False):
+                try:
+                    with artifact.open(encoding="utf-8") as handle:
+                        artifact_payload = json.load(handle)
+                    if "input_layer" in artifact_payload:
+                        classified_path = _session_output_path(args.output, "classified", ".csv")
+                        _do_classify(Path(args.output), artifact, classified_path)
+                        with classified_path.open(encoding="utf-8", newline="") as handle:
+                            rows = list(csv.DictReader(handle))
+                        predicted_counts = Counter(
+                            row.get("predicted_label", "")
+                            for row in rows
+                            if row.get("protocol_flag") == "SYN_ACK"
+                        )
+                        summary = "  ".join(f"{label}={count}" for label, count in sorted(predicted_counts.items()))
+                        _print(f"[bold green][Betta-Morpho] Auto-classify:[/] {summary}")
+                except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
+                    _print(f"[yellow][Betta-Morpho] Auto-classify skipped: {exc}[/]")
+
+            if getattr(args, "discover_hostnames", False):
+                try:
+                    discovery_artifact_path: Path | None = None
+                    configured_artifact = getattr(args, "host_discovery_artifact", None)
+                    if configured_artifact:
+                        candidate = Path(configured_artifact)
+                        if candidate.exists():
+                            discovery_artifact_path = candidate
+                        else:
+                            _print(f"[yellow][Betta-Morpho] Host discovery artifact skipped: not found: {candidate}[/]")
+                    else:
+                        default_artifact = default_artifact_path()
+                        if default_artifact.exists():
+                            discovery_artifact_path = default_artifact
+
+                    hostname_rows = discover_from_port_results(all_results, artifact_path=discovery_artifact_path)
+                    if getattr(args, "host_discovery_output", None):
+                        export_discovery_csv(hostname_rows, Path(args.host_discovery_output))
+                    if getattr(args, "host_discovery_html", None):
+                        export_discovery_html(hostname_rows, Path(args.host_discovery_html))
+                    counts = Counter(row.get("predicted_label", "") for row in hostname_rows)
+                    _print(
+                        "[bold green][Betta-Morpho] host discovery:[/] "
+                        + f"candidates={len(hostname_rows)} "
+                        + f"high_value={counts.get('high_value', 0)} "
+                        + f"supporting={counts.get('supporting', 0)} "
+                        + f"noise={counts.get('noise', 0)}"
+                    )
+                except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
+                    _print(f"[yellow][Betta-Morpho] Host discovery skipped: {exc}[/]")
+
+            try:
+                from tools.scan_history import ScanHistory
+
+                scan_id = ScanHistory(str(PROJECT_ROOT / "data" / "scan_history.db")).save_scan(
+                    targets[0] if targets else args.target,
+                    args.profile,
+                    all_results,
+                )
+                _print(f"[dim]Saved to scan history (scan #{scan_id})[/]")
+            except (ImportError, OSError, sqlite3.Error, ValueError) as exc:
+                _print(f"[yellow][Betta-Morpho] Scan history skipped: {exc}[/]")
+
+            progress_writer.finish(len(all_results))
+            return 0
+        except KeyboardInterrupt:
+            progress_writer.abort(len(all_results))
+            return 130
 
     if args.cmd == "classify-results":
         data_path = Path(args.data)
@@ -1153,4 +1179,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        _print("[yellow][Betta-Morpho] Interrupted by user.[/]")
+        raise SystemExit(130)
