@@ -58,7 +58,7 @@ Typical path:
 
 Purpose:
 
-- normalize service names, versions, and CPE hints using local Nmap-derived data
+- normalize service names, aliases, port fallbacks, and CPE hints using local Nmap-derived data
 
 Typical path:
 
@@ -124,6 +124,12 @@ Main CSV fields:
 
 Classifier training mainly uses the original telemetry fields.
 Enrichment fields are most useful for reports, service modeling, and later research loops.
+
+Current enrichment follows a layered approach:
+
+- fast catalog fallback from the internal Nmap-derived service artifact
+- protocol follow-up for HTTP, WinRM, TLS, SMB, LDAP rootDSE, and RPC-over-HTTP when reachable
+- optional Nmap verification for product-level confirmation and mismatch analysis
 
 Additional passive-host-discovery outputs:
 

@@ -65,6 +65,7 @@ Useful flags:
 - `--progress-log FILE`
 - `--speed-level 1..100`
 - `--service-artifact FILE`
+- `--service-catalog FILE`
 - `--active-learning-output FILE`
 - `--verify-with-nmap`
 - `--save-weights FILE`
@@ -99,6 +100,15 @@ python launcher.py discover-hostnames \
   --output data/scans/SESSION/SESSION_hostnames.csv \
   --html data/scans/SESSION/SESSION_hostnames_report.html
 ```
+
+### Service Catalog Refresh
+
+```bash
+python launcher.py service-catalog-build \
+  --output artifacts/service_catalog.json
+```
+
+Use this when you want Betta-Morpho's port and alias fallback to reflect the local Nmap databases currently installed on the host.
 
 ## Rust Runtime
 

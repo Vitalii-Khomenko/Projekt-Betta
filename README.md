@@ -5,7 +5,7 @@ The project combines:
 
 - SNN-driven scanning logic
 - telemetry export and classifier training
-- enrichment and service fingerprinting
+- enrichment and service fingerprinting from protocol probes plus Nmap-derived service metadata
 - passive hostname/domain discovery and ranking
 - report generation and Nmap verification
 - benchmark and experiment tracking
@@ -33,6 +33,7 @@ Main idea:
 
 - Python builds and evaluates model artifacts
 - Betta-Morpho runtime uses those artifacts during scanning
+- open-port naming starts with an internal service catalog built from local Nmap data, then improves labels with protocol-aware follow-up probes
 - scan results feed reports, verification, replay, and later retraining
 - benchmark and registry tooling track what changed between runs
 
@@ -117,6 +118,13 @@ python launcher.py verify-betta-morpho \
   --scan-csv data/scans/SESSION/SESSION_result.csv
 ```
 
+Rebuild the internal service catalog from local Nmap databases:
+
+```bash
+python launcher.py service-catalog-build \
+  --output artifacts/service_catalog.json
+```
+
 Compare two scan runs:
 
 ```bash
@@ -139,7 +147,7 @@ Start here, then go deeper only where needed:
 - [docs/QUICKSTART.md](docs/QUICKSTART.md)  
   Short onboarding for Windows, Linux, training, and first scan runs.
 - [docs/SCANNING_GUIDE.md](docs/SCANNING_GUIDE.md)  
-  Scan modes, speed profiles, checkpoints, raw vs connect, stealth, verification.
+  Scan modes, speed profiles, checkpoints, raw vs connect, service identification, verification.
 - [docs/TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md)  
   Synthetic data, real data, classifier training, replay, evaluation.
 - [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)  

@@ -158,10 +158,12 @@ Current enrichment responsibilities:
 
 - banner capture
 - safe binary-banner normalization
-- service normalization
-- HTTP probing
+- service normalization from the internal Nmap-derived catalog plus protocol probes
+- HTTP and WinRM probing
 - TLS certificate inspection
 - SMB follow-up
+- LDAP rootDSE follow-up on reachable directory ports
+- RPC-over-HTTP follow-up on port `593`
 - CVE hint lookup
 - service-model predictions
 - active-learning export for uncertain rows

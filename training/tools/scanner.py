@@ -12,7 +12,7 @@
 #
 # Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 # License : Apache-2.0 - see LICENSE
-# Version : 2.4.0
+# Version : 2.4.1
 # Created : 01.04.2026
 # =============================================================================
 """Betta-Morpho SNN scanner CLI facade and reporting pipeline."""
@@ -91,6 +91,7 @@ _WELL_KNOWN: dict[int, str] = {
     23: "Telnet",
     25: "SMTP",
     53: "DNS",
+    88: "kerberos-sec",
     80: "HTTP",
     110: "POP3",
     111: "RPCBind",
@@ -101,14 +102,20 @@ _WELL_KNOWN: dict[int, str] = {
     389: "LDAP",
     443: "HTTPS",
     445: "SMB",
+    464: "kpasswd5",
     465: "SMTPS",
     587: "SMTP-sub",
+    593: "http-rpc-epmap",
     631: "IPP",
+    636: "ldapssl",
     993: "IMAPS",
     995: "POP3S",
     1433: "MSSQL",
     1521: "Oracle",
+    2179: "vmrdp",
     2222: "SSH-alt",
+    3268: "globalcatLDAP",
+    3269: "globalcatLDAPssl",
     3306: "MySQL",
     3389: "RDP",
     4444: "C2/Meterp",
@@ -123,6 +130,7 @@ _WELL_KNOWN: dict[int, str] = {
     8888: "Jupyter",
     9200: "Elasticsearch",
     9300: "ES-Transport",
+    9389: "adws",
     27017: "MongoDB",
     27016: "MongoDB-s",
     49152: "WinEphemeral",

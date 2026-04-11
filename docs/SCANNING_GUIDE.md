@@ -32,6 +32,8 @@ python launcher.py scan \
   --transport connect
 ```
 
+Connect mode is also the easiest way to get consistent application follow-up on services such as HTTP, WinRM, LDAP, and RPC-over-HTTP.
+
 ## Speed Profiles
 
 Main presets:
@@ -116,6 +118,22 @@ python launcher.py scan \
   --report artifacts/snn_model.json
 ```
 
+## Service Identification
+
+Betta-Morpho does not rely on a single naming source.
+
+- first it applies an internal service catalog built from local Nmap databases in `artifacts/service_catalog.json`
+- then it adds protocol-aware follow-up where the target responds
+- current follow-up paths include HTTP and WinRM headers, TLS certificates, SMB negotiation, LDAP rootDSE on `389/3268`, and RPC over HTTP on `593`
+- some dynamic or opaque ports still need external verification, especially when the service does not expose an easy banner
+
+Rebuild the internal catalog from the local Nmap installation when needed:
+
+```bash
+python launcher.py service-catalog-build \
+  --output artifacts/service_catalog.json
+```
+
 ### Full Port Sweep
 
 ```bash
@@ -171,6 +189,12 @@ python launcher.py verify-betta-morpho \
   --scan-csv data/scans/SESSION/SESSION_result.csv
 ```
 
+This verification step is especially useful for:
+
+- dynamic Windows RPC ports
+- ports that only expose generic `tcpwrapped` or minimal banners
+- confirming product names after Betta-Morpho already narrowed the target port set
+
 Or in one workflow:
 
 ```bash
@@ -215,6 +239,8 @@ Typical scan output directory includes:
 - `*_classified.csv`
 - `*_active_learning.csv`
 - `*_progress.log`
+- `*_comparison.csv`
+- `*_comparison.json`
 - `*_hostnames.csv`
 - `*_hostnames_report.html`
 

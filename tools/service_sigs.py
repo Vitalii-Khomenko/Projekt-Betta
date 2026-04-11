@@ -13,7 +13,7 @@ training/tools/scanner.py.
 
 Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 License : Apache-2.0 - see LICENSE
-Version : 2.3.3
+Version : 2.3.5
 Created : 01.04.2026
 """
 from __future__ import annotations
@@ -21,9 +21,9 @@ from __future__ import annotations
 import re
 
 try:
-    from tools.nmap_service_catalog import lookup_product
+    from tools.nmap_service_catalog import lookup_product, lookup_service_by_port
 except ImportError:
-    from nmap_service_catalog import lookup_product
+    from nmap_service_catalog import lookup_product, lookup_service_by_port
 
 
 def _catalog_cpe(catalog: dict[str, object]) -> str:
@@ -100,6 +100,7 @@ _PORT_HINTS: dict[int, str] = {
 }
 
 _SIGNATURES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"ncacn_http(?:[/ |:-]+(\d+(?:\.\d+)+))?", re.IGNORECASE), "Microsoft Windows RPC over HTTP"),
     (re.compile(r"msrpc|microsoft windows rpc", re.IGNORECASE), "Microsoft Windows RPC"),
     (re.compile(r"netbios-ssn|microsoft windows netbios-ssn", re.IGNORECASE), "Microsoft Windows netbios-ssn"),
     (re.compile(r"ms-sql-s|microsoft sql server|sql server", re.IGNORECASE), "Microsoft SQL Server"),
@@ -260,6 +261,12 @@ def detect_service(port: int, banner: str = "", nmap_service: str = "") -> dict[
         catalog = lookup_product(hint)
         cpe = _catalog_cpe(catalog) if catalog else ""
         return {"name": hint, "version": "", "display": hint, "cpe": cpe}
+
+    port_catalog = lookup_service_by_port(port)
+    if port_catalog:
+        service_name = str(port_catalog.get("service_name", "")).strip()
+        if service_name:
+            return {"name": service_name, "version": "", "display": service_name, "cpe": ""}
 
     catalog_source = decoded_hex or text
     catalog = lookup_product(catalog_source)

@@ -2,6 +2,12 @@
 
 This guide is for the shortest path from clone to useful output.
 
+Service naming in Betta-Morpho is layered:
+
+- the internal `artifacts/service_catalog.json` gives fast port and alias fallback derived from local Nmap data
+- protocol-aware probes then improve labels for HTTP, WinRM, TLS, SMB, LDAP rootDSE, and RPC over HTTP where the target responds
+- `verify-betta-morpho` remains the recommended post-scan validation step for high-confidence reporting
+
 ## 1. Install
 
 ### Windows
@@ -48,6 +54,13 @@ python launcher.py scan \
 ```
 
 This writes a session directory under `data/scans/`.
+
+If you want to refresh the internal service catalog from your local Nmap installation before scanning:
+
+```bash
+python launcher.py service-catalog-build \
+  --output artifacts/service_catalog.json
+```
 
 ## 4. Extract Passive Hostnames
 
@@ -135,6 +148,8 @@ python launcher.py scan \
 python launcher.py verify-betta-morpho \
   --scan-csv data/scans/SESSION/SESSION_result.csv
 ```
+
+This runs Nmap only against the Betta-Morpho-open ports and writes comparison CSV and JSON artifacts next to the scan session.
 
 ## 11. Compare Two Runs
 

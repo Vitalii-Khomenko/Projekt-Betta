@@ -6,13 +6,13 @@ local Nmap probe databases. Runtime service detection uses the generated
 catalog JSON instead of reading /usr/share/nmap files on every scan.
 
 Key commands:
-  python tools/nmap_service_catalog.py build
-  python tools/nmap_service_catalog.py build --output artifacts/service_catalog.json
-  python tools/nmap_service_catalog.py build --probes /usr/share/nmap/nmap-service-probes --services /usr/share/nmap/nmap-services
+    python tools/nmap_service_catalog.py build
+    python tools/nmap_service_catalog.py build --output artifacts/service_catalog.json
+    python tools/nmap_service_catalog.py build --probes /usr/share/nmap/nmap-service-probes --services /usr/share/nmap/nmap-services
 
 Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
 License : Apache-2.0 - see LICENSE
-Version : 2.3.3
+Version : 2.3.4
 Created : 01.04.2026
 """
 from __future__ import annotations
@@ -275,7 +275,7 @@ def build_catalog(
 
 @lru_cache(maxsize=8)
 def load_catalog(
-    catalog_path: str | Path | None = DEFAULT_CATALOG_PATH,
+    catalog_path: str | Path | None = None,
     services_path: str | Path = DEFAULT_SERVICES_PATH,
 ) -> dict[str, dict[str, object]]:
     path = resolve_catalog_path(catalog_path)
@@ -304,7 +304,7 @@ def load_catalog(
 
 def lookup_product(
     text: str,
-    catalog_path: str | Path | None = DEFAULT_CATALOG_PATH,
+    catalog_path: str | Path | None = None,
     services_path: str | Path = DEFAULT_SERVICES_PATH,
 ) -> dict[str, object]:
     if not text:
@@ -325,6 +325,49 @@ def lookup_product(
         matches.sort(key=lambda item: item[0], reverse=True)
         return matches[0][1]
     return {}
+
+
+def lookup_service_by_port(
+    port: int,
+    protocol: str = "tcp",
+    catalog_path: str | Path | None = None,
+    services_path: str | Path = DEFAULT_SERVICES_PATH,
+) -> dict[str, object]:
+    if port <= 0:
+        return {}
+
+    protocol_name = protocol.strip().lower()
+    if not protocol_name:
+        return {}
+
+    catalog = load_catalog(catalog_path, services_path)
+    port_key = f"{int(port)}/{protocol_name}"
+    matches: list[tuple[int, str, dict[str, object]]] = []
+    for value in catalog.values():
+        ports = value.get("ports")
+        if not isinstance(ports, list):
+            continue
+        if port_key not in {str(item).strip().lower() for item in ports if str(item).strip()}:
+            continue
+
+        service_names = value.get("service_names")
+        if isinstance(service_names, list):
+            candidates = [_clean_catalog_text(str(item)) for item in service_names if _clean_catalog_text(str(item))]
+        else:
+            candidates = []
+        service_name = candidates[0] if candidates else _clean_catalog_text(str(value.get("product", "")))
+        if not service_name:
+            continue
+
+        entry = dict(value)
+        entry["service_name"] = service_name
+        matches.append((len(service_name), service_name.lower(), entry))
+
+    if not matches:
+        return {}
+
+    matches.sort(key=lambda item: (item[0], item[1]))
+    return matches[0][2]
 
 
 def build_parser() -> argparse.ArgumentParser:
