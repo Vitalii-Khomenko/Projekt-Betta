@@ -1,3 +1,18 @@
+# =============================================================================
+# scanner_enrichment.py  -  Protocol enrichment helpers for Betta-Morpho scans
+# =============================================================================
+# Usage:
+#   python training/tools/scanner.py scan --target 10.10.10.5 [options]
+#   python training/tools/scanner.py --help
+#
+# Key options:
+#   --report PATH    Export enriched report artifacts after a scan
+#   --ports SPEC     Scan ports, then enrich the discovered services
+#
+# Author  : Vitalii Khomenko <khomenko.vitalii@pm.me>
+# License : Apache-2.0 - see LICENSE
+# Version : 2.3.4
+# =============================================================================
 from __future__ import annotations
 
 import csv
@@ -19,6 +34,13 @@ from training.tools.scanner_support import (
 )
 from training.tools.scanner_types import PortResult
 from training.tools.scanner_utils import _clean_probe_text, _format_probe_bytes, _normalize_result_text_fields, _update_entropy_from_text
+
+try:
+    from impacket.nmb import NetBIOSError as _IMPACKET_NetBIOSError  # type: ignore
+except ImportError:
+    _IMPACKET_NetBIOSError = None
+
+NetBIOSError = _IMPACKET_NetBIOSError
 
 _HTTP_PORTS = {80, 81, 443, 591, 593, 8000, 8008, 8080, 8081, 8443, 8843, 8880, 8888, 9000, 9443}
 _HTTPS_PORTS = {443, 8443, 8843, 9443}
@@ -234,8 +256,10 @@ def _probe_smb(result: PortResult, timeout: float = 3.0) -> dict[str, str]:
     remote_name = result.host if result.port == 445 else "*SMBSERVER"
     connection = None
     auth_note = ""
-    login_errors = tuple(exc for exc in (OSError, TimeoutError, SMBSessionError) if exc is not None)
-    session_errors = tuple(exc for exc in (AttributeError, OSError, RuntimeError, TimeoutError, SMBSessionError) if exc is not None)
+    login_errors = tuple(exc for exc in (OSError, TimeoutError, SMBSessionError, NetBIOSError) if exc is not None)
+    session_errors = tuple(
+        exc for exc in (AttributeError, OSError, RuntimeError, TimeoutError, SMBSessionError, NetBIOSError) if exc is not None
+    )
     try:
         connection = SMBConnection(
             remoteName=remote_name,
