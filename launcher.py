@@ -51,6 +51,17 @@ except ImportError:
     Table = cast(Any, None)
     RICH_AVAILABLE = False
 
+try:
+    from tools.verify_scan import NMAP_PRESETS as _NMAP_PRESETS  # type: ignore[import]
+except Exception:
+    try:
+        import sys as _sys
+        import os as _os
+        _sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
+        from verify_scan import NMAP_PRESETS as _NMAP_PRESETS  # type: ignore[import]
+    except Exception:
+        _NMAP_PRESETS = None  # type: ignore[assignment]
+
 ROOT = Path(__file__).resolve().parent
 SPEC_PATH = ROOT / "docs" / "Engineering_Draft.md"
 DEFAULT_DATASET = "data/synthetic_dataset.csv"
@@ -159,6 +170,39 @@ REPORT_MODE_INFO = [
     ("2", "manual_output", "Manual CSV / HTML paths", "Use when you want exact output locations and still want structured exports."),
     ("3", "minimal", "Minimal output", "Use for lightweight runs or testing when you only need the essentials."),
 ]
+
+
+def _choose_nmap_config() -> tuple[str, str]:
+    """Interactive Nmap preset + extra flags chooser.
+    Returns (preset_name, extra_flags_string).
+    """
+    presets = _NMAP_PRESETS if _NMAP_PRESETS is not None else []
+    options: list[tuple[str, str, str]] = [
+        (key, name, description)
+        for key, name, description, _ in presets
+    ]
+    if options:
+        _print_panel(
+            "Nmap Verification Profile",
+            "Choose a preset that matches your goal.\n"
+            "You can add extra flags after the preset to extend or override behavior.\n"
+            "Examples of extra flags: --script=banner  -v  --script=smb-vuln*  --version-intensity 9",
+        )
+        choice = _prompt_menu_choice("Choose Nmap Preset", options, "1")
+        preset = next((name for key, name, _, _ in presets if key == choice), "deep")
+    else:
+        preset = "deep"
+    extra = prompt_text(
+        "Extra Nmap flags to append (blank = none, e.g. '--script=banner -v')", ""
+    )
+    chosen_desc = next((desc for _, name, desc, _ in presets if name == preset), preset)
+    _print_panel(
+        "Nmap Config Summary",
+        f"Preset  : {preset}\n"
+        f"Flags   : {chosen_desc}\n"
+        f"Extra   : {extra or '(none)'}\n",
+    )
+    return preset, extra
 
 PROJECT_LEARNING_TOPICS = {
     "1": (
@@ -524,6 +568,10 @@ def _build_scan_args_interactive() -> list[str]:
         "For long scans, checkpoints help prevent data loss and make recovery easier.",
     )
     verify_with_nmap = prompt_bool("Run targeted Nmap verification as a separate post-scan step->", False)
+    nmap_preset = "deep"
+    nmap_extra = ""
+    if verify_with_nmap:
+        nmap_preset, nmap_extra = _choose_nmap_config()
     checkpoint_every = prompt_int("Checkpoint every N ports", 1000)
     skip_discovery = prompt_bool("Skip host discovery->", False)
     use_decoys = prompt_bool("Enable decoy packets->", False)
@@ -594,6 +642,9 @@ def _build_scan_args_interactive() -> list[str]:
         args.extend(["--host-discovery-html", host_discovery_html])
     if verify_with_nmap:
         args.append("--verify-with-nmap")
+        args.extend(["--nmap-preset", nmap_preset])
+        if nmap_extra:
+            args.extend(["--nmap-extra", nmap_extra])
     if transport_mode == "connect":
         args.append("--connect-only")
     if skip_discovery:
@@ -1008,13 +1059,20 @@ def _scanner_launch_menu() -> int:
                 return _run_steps([("Run Betta-Morpho scan", "training/tools/scanner.py", _build_scan_args_interactive())])
             return 0
         if choice == "2":
-            return run_script(
-                "tools/verify_scan.py",
-                [
-                    "--scan-csv",
-                    prompt_text("Betta-Morpho result CSV", "data/scans/latest/YYYYMMDD_HHMMSS_IP_result.csv"),
-                ],
+            _print_panel(
+                "Verify Previous Scan With Nmap",
+                "This runs Nmap only against ports Betta-Morpho found open.\n"
+                "Select a preset and optionally add extra flags to customize the verification.",
             )
+            scan_csv = prompt_text(
+                "Betta-Morpho result CSV",
+                "data/scans/latest/YYYYMMDD_HHMMSS_IP_result.csv",
+            )
+            nmap_preset, nmap_extra = _choose_nmap_config()
+            verify_args = ["--scan-csv", scan_csv, "--nmap-preset", nmap_preset]
+            if nmap_extra:
+                verify_args.extend(["--nmap-extra", nmap_extra])
+            return run_script("tools/verify_scan.py", verify_args)
         if choice == "3":
             arguments = [
                 "discover",
