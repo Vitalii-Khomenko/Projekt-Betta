@@ -442,10 +442,12 @@ def _build_scan_args_interactive() -> list[str]:
         "- 10.10.10.5-25\n"
         "- 10.10.10.5,10.10.10.6\n\n"
         "For ports, start with top20 or top100 if you are learning or validating behavior.\n"
+        "Type 'all' to scan the full port range 1-65535 without typing it manually.\n"
         "Use larger ranges after the workflow is stable.",
     )
     target = prompt_text("Target IP / CIDR / range / comma-list", "10.10.10.5")
-    ports = prompt_text("TCP ports (example: top100, top20, 1-1000, 22,80,443)", "top100")
+    _raw_ports = prompt_text("TCP ports (top100, top20, 1-1000, 22,80,443, 'all' = full 1-65535)", "top100")
+    ports = "1-65535" if _raw_ports.strip().lower() == "all" else _raw_ports
     udp_ports = ""
     if scan_scope in {"tcp_udp", "advanced"}:
         _print_panel(

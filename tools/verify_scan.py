@@ -49,6 +49,74 @@ def _clean_training_text(value: str) -> str:
     return " | ".join(filtered)
 
 
+# ---------------------------------------------------------------------------
+# Nmap flag presets available to callers (launcher menu, CLI, API)
+# ---------------------------------------------------------------------------
+NMAP_PRESETS: list[tuple[str, str, str, list[str]]] = [
+    (
+        "1",
+        "deep",
+        "Deep recon  (-sV -sC -T5 -Pn -vv)",
+        ["-sV", "-sC", "-T5", "-Pn", "-vv"],
+    ),
+    (
+        "2",
+        "quick",
+        "Quick version scan  (-sV -T4 -Pn)",
+        ["-sV", "-T4", "-Pn"],
+    ),
+    (
+        "3",
+        "stealth",
+        "Stealth SYN + version  (-sS -sV -T2 -Pn)",
+        ["-sS", "-sV", "-T2", "-Pn"],
+    ),
+    (
+        "4",
+        "scripts-only",
+        "Scripts + version, no timing pressure  (-sV -sC -Pn)",
+        ["-sV", "-sC", "-Pn"],
+    ),
+    (
+        "5",
+        "aggressive",
+        "Aggressive all-in  (-A -T5 -Pn -vv)",
+        ["-A", "-T5", "-Pn", "-vv"],
+    ),
+    (
+        "6",
+        "udp",
+        "UDP service scan  (-sU -sV -T4 -Pn)",
+        ["-sU", "-sV", "-T4", "-Pn"],
+    ),
+    (
+        "7",
+        "os-detect",
+        "OS + version detection  (-O -sV -T4 -Pn)",
+        ["-O", "-sV", "-T4", "-Pn"],
+    ),
+    (
+        "8",
+        "vuln",
+        "Vuln scripts  (-sV --script=vuln -T4 -Pn)",
+        ["-sV", "--script=vuln", "-T4", "-Pn"],
+    ),
+]
+
+NMAP_DEFAULT_PRESET = "deep"
+
+
+def resolve_nmap_flags(preset_name: str, extra: str = "") -> list[str]:
+    """Return the nmap flag list for *preset_name*, optionally appending extra tokens."""
+    flags: list[str] = []
+    for _, name, _, flag_list in NMAP_PRESETS:
+        if name == preset_name:
+            flags = list(flag_list)
+            break
+    extra_tokens = [t for t in extra.strip().split() if t]
+    return flags + extra_tokens
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Nmap only against ports found open by Betta-Morpho and save a comparison report."
@@ -57,6 +125,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target", help="Target IP or hostname; inferred from Betta-Morpho CSV if omitted")
     parser.add_argument("--output-dir", help="Directory for verification artifacts")
     parser.add_argument("--nmap-bin", default="nmap", help="Nmap executable path")
+    parser.add_argument("--nmap-preset", default=NMAP_DEFAULT_PRESET,
+                        help=f"Named nmap flag preset ({', '.join(n for _, n, _, _ in NMAP_PRESETS)})")
+    parser.add_argument("--nmap-extra", default="",
+                        help="Extra nmap flags appended after the preset, space-separated (e.g. '--script=banner -v')")
     parser.add_argument("--service-catalog", default="artifacts/service_catalog.json", help="Internal service catalog artifact used for normalization")
     return parser.parse_args()
 
@@ -82,24 +154,31 @@ def infer_target_and_ports(scan_csv: Path) -> tuple[str, list[int], dict[int, di
     return target, sorted(ports), port_rows
 
 
-def run_nmap(nmap_bin: str, target: str, ports: list[int], output_dir: Path, session_prefix: str) -> Path:
+def run_nmap(
+    nmap_bin: str,
+    target: str,
+    ports: list[int],
+    output_dir: Path,
+    session_prefix: str,
+    nmap_preset: str = NMAP_DEFAULT_PRESET,
+    nmap_extra: str = "",
+) -> Path:
     if shutil.which(nmap_bin) is None:
         raise FileNotFoundError(f"nmap executable not found: {nmap_bin}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     base = output_dir / f"{session_prefix}_nmap_verify"
+    flags = resolve_nmap_flags(nmap_preset, nmap_extra)
     command = [
         nmap_bin,
-        "-Pn",
-        "-n",
-        "-sT",
-        "-sV",
+        *flags,
         "-p",
         ",".join(str(port) for port in ports),
         target,
         "-oA",
         str(base),
     ]
+    print(f"[nmap] running: {' '.join(command)}")
     subprocess.run(command, check=True)
     return base.parent / f"{base.name}.xml"
 
@@ -286,6 +365,8 @@ def verify_betta_morpho_csv(
     output_dir: str | Path | None = None,
     nmap_bin: str = "nmap",
     service_catalog: str | Path | None = None,
+    nmap_preset: str = NMAP_DEFAULT_PRESET,
+    nmap_extra: str = "",
 ) -> dict:
     if service_catalog is not None:
         os.environ[SERVICE_CATALOG_ENV] = str(Path(service_catalog))
@@ -303,7 +384,15 @@ def verify_betta_morpho_csv(
         else scan_csv_path.parent / f"{session_prefix}_nmap_verify_{timestamp}"
     )
 
-    xml_path = run_nmap(nmap_bin, resolved_target, betta_ports, resolved_output_dir, session_prefix)
+    xml_path = run_nmap(
+        nmap_bin,
+        resolved_target,
+        betta_ports,
+        resolved_output_dir,
+        session_prefix,
+        nmap_preset=nmap_preset,
+        nmap_extra=nmap_extra,
+    )
     nmap_results = parse_nmap_xml(xml_path)
     comparison_csv, comparison_json = write_comparison(
         resolved_output_dir,
@@ -330,6 +419,8 @@ def main() -> int:
             output_dir=args.output_dir,
             nmap_bin=args.nmap_bin,
             service_catalog=args.service_catalog,
+            nmap_preset=args.nmap_preset,
+            nmap_extra=args.nmap_extra,
         )
     except FileNotFoundError as exc:
         print(f"ERROR: {exc}")
