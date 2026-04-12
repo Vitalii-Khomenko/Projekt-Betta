@@ -207,7 +207,7 @@ def _ldap_attr_text(attributes: dict[str, object], key: str, limit: int = 120) -
 
 
 def _probe_ldap_directory(result: PortResult, timeout: float = 3.0) -> dict[str, str]:
-    if not LDAP_AVAILABLE or result.port not in _LDAP_PORTS:
+    if not LDAP_AVAILABLE or result.port not in _LDAP_PORTS or LDAPServer is None or LDAPConnection is None or LDAP_BASE is None:
         return {}
 
     import ssl
@@ -228,7 +228,7 @@ def _probe_ldap_directory(result: PortResult, timeout: float = 3.0) -> dict[str,
             connect_timeout=ldap_timeout,
             use_ssl=use_tls,
             tls=tls_config,
-            get_info=None,
+            get_info='NO_INFO',
         )
         connection = LDAPConnection(server, authentication=LDAP_ANONYMOUS, receive_timeout=ldap_timeout)
         connection.open()
