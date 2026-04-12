@@ -832,6 +832,10 @@ def build_parser() -> argparse.ArgumentParser:
     scan_cmd.add_argument("--host-discovery-artifact", metavar="PATH", help="Optional passive-host-discovery artifact JSON")
     scan_cmd.add_argument("--host-discovery-output", metavar="PATH", help="Write discovered hostname candidates to PATH")
     scan_cmd.add_argument("--host-discovery-html", metavar="PATH", help="Write hostname discovery HTML report to PATH")
+    scan_cmd.add_argument("--nmap-preset", default="deep",
+                          help="Named Nmap flag preset used when --verify-with-nmap is active (deep/quick/stealth/scripts-only/aggressive/udp/os-detect/vuln)")
+    scan_cmd.add_argument("--nmap-extra", default="",
+                          help="Extra Nmap flags appended after the preset, space-separated")
 
     classify_cmd = subcommands.add_parser("classify-results", help="Load scan CSV and add predicted_label via the SNN classifier")
     classify_cmd.add_argument("--data", required=True, help="Input scan CSV path")
@@ -1052,6 +1056,8 @@ def main() -> int:
                                 scan_csv=Path(args.output),
                                 target=targets[0] if targets else args.target,
                                 service_catalog=args.service_catalog,
+                                nmap_preset=getattr(args, "nmap_preset", "deep"),
+                                nmap_extra=getattr(args, "nmap_extra", ""),
                             )
                             _print(
                                 "[bold green][Betta-Morpho] Nmap verify:[/] "

@@ -711,6 +711,10 @@ def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
         scan_args.extend(["--host-discovery-html", args.host_discovery_html])
     if getattr(args, "verify_with_nmap", False):
         scan_args.append("--verify-with-nmap")
+        scan_args.extend(["--nmap-preset", getattr(args, "nmap_preset", "deep")])
+        nmap_extra = getattr(args, "nmap_extra", "")
+        if nmap_extra:
+            scan_args.extend(["--nmap-extra", nmap_extra])
     if getattr(args, "save_weights", None):
         scan_args.extend(["--save-weights", args.save_weights])
     if getattr(args, "spoof_ttl", None) is not None:
@@ -1290,6 +1294,10 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Write hostname discovery HTML report to PATH")
     scan.add_argument("--verify-with-nmap", action="store_true",
                       help="Run targeted Nmap verification after the scan")
+    scan.add_argument("--nmap-preset", default="deep",
+                      help="Named Nmap flag preset for verification (deep/quick/stealth/scripts-only/aggressive/udp/os-detect/vuln)")
+    scan.add_argument("--nmap-extra", default="",
+                      help="Extra Nmap flags appended after the preset, space-separated")
     scan.add_argument("--save-weights", default=None,
                       help="Save adapted scanner weights after the run")
     scan.add_argument("--spoof-ttl", type=int, default=None,
