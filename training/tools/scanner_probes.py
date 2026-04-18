@@ -48,6 +48,19 @@ except ImportError:
     DNSPYTHON_AVAILABLE = False
 
 
+UDP_PAYLOADS = {
+    53: b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07version\x04bind\x00\x00\x10\x00\x03", # DNS version.bind CH TXT
+    123: b"\xe3\x00\x04\xfa\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", # NTP v4 Client
+    137: b"\x80\xf0\x00\x10\x00\x01\x00\x00\x00\x00\x00\x00\x20\x43\x4b\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x00\x00\x21\x00\x01", # NetBIOS NBSTAT
+    161: b"\x30\x26\x02\x01\x01\x04\x06\x70\x75\x62\x6c\x69\x63\xa0\x19\x02\x04\x13\x34\x56\x78\x02\x01\x00\x02\x01\x00\x30\x0b\x30\x09\x06\x05\x2b\x06\x01\x02\x01\x05\x00", # SNMP v2c public GetRequest sysDescr
+    500: b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x10\x02\x00\x00\x00\x00\x00\x00\x00\x00\x28\x00\x00\x00\x0c\x00\x00\x00\x01\x01\x00\x00\x10", # IKEv1
+    623: b"\x06\x00\xff\x0f\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x81\x14", # IPMI Ping
+    1194: b"\x38\x01\x00\x00\x00\x00\x00\x00\x00", # OpenVPN ping
+    1900: b"M-SEARCH * HTTP/1.1\r\nHost: 239.255.255.250:1900\r\nMan: \"ssdp:discover\"\r\nST: ssdp:all\r\n\r\n", # SSDP
+    5353: b"\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x09\x5f\x73\x65\x72\x76\x69\x63\x65\x73\x07\x5f\x64\x6e\x73\x2d\x73\x64\x04\x5f\x75\x64\x70\x05\x6c\x6f\x63\x61\x6c\x00\x00\x0c\x00\x01", # mDNS
+}
+
+
 def connect_probe(host: str, port: int, timeout: float = 1.0, source_port: Optional[int] = None) -> PortResult:
     import socket as sock
 
@@ -110,6 +123,67 @@ def connect_probe(host: str, port: int, timeout: float = 1.0, source_port: Optio
     except (OSError, TimeoutError):
         rtt_us = (time.monotonic() - t0) * 1_000_000
         return PortResult(host, port, "filtered", "tcp", "TIMEOUT", rtt_us, 0, ts_us)
+
+
+async def _async_connect_probe(host: str, port: int, timeout: float, ts_us: int) -> PortResult:
+    import asyncio
+    import time
+    t0 = time.monotonic()
+    try:
+        fut = asyncio.open_connection(host, port)
+        reader, writer = await asyncio.wait_for(fut, timeout=timeout)
+        rtt_us = (time.monotonic() - t0) * 1_000_000
+        from training.tools.scanner_utils import _format_probe_bytes, _shannon_entropy
+        
+        banner = ""
+        payload_size = 0
+        entropy = 0.0
+        try:
+            block = await asyncio.wait_for(reader.read(256), timeout=2.0)
+            if block:
+                banner = _format_probe_bytes(block)
+                payload_size = len(block)
+                entropy = _shannon_entropy(block)
+        except Exception:
+            pass
+            
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return PortResult(host, port, "open", "tcp", "SYN_ACK", rtt_us, payload_size, ts_us, banner=banner, response_entropy=entropy)
+    except asyncio.TimeoutError:
+        rtt_us = (time.monotonic() - t0) * 1_000_000
+        return PortResult(host, port, "filtered", "tcp", "TIMEOUT", rtt_us, 0, ts_us)
+    except OSError as exc:
+        rtt_us = (time.monotonic() - t0) * 1_000_000
+        flag = "RST" if "refused" in str(exc).lower() else "TIMEOUT"
+        state = "closed" if flag == "RST" else "filtered"
+        return PortResult(host, port, state, "tcp", flag, rtt_us, 0, ts_us)
+    except Exception:
+        rtt_us = (time.monotonic() - t0) * 1_000_000
+        return PortResult(host, port, "filtered", "tcp", "TIMEOUT", rtt_us, 0, ts_us)
+
+
+def async_batch_connect_probe(host: str, ports: list[int], timeout: float = 1.0) -> list[PortResult]:
+    import asyncio
+    import time
+    ts_us = int(time.time() * 1_000_000)
+    
+    async def _run():
+        sem = asyncio.Semaphore(max(1, len(ports)))
+        async def _bounded_probe(p: int):
+            async with sem:
+                return await _async_connect_probe(host, p, timeout, ts_us)
+                
+        tasks = []
+        for p in ports:
+            tasks.append(asyncio.create_task(_bounded_probe(p)))
+            await asyncio.sleep(0.001)
+        return await asyncio.gather(*tasks)
+        
+    return asyncio.run(_run())
 
 
 def retry_filtered_tcp_with_source_port(
@@ -363,7 +437,8 @@ def batch_syn_probe(
 
 def udp_probe(host: str, port: int, profile: SNNProfile) -> PortResult:
     ts_us = int(time.time() * 1_000_000)
-    packet = IP(dst=host, ttl=profile.ttl) / UDP(dport=port)  # type: ignore[operator]
+    payload = UDP_PAYLOADS.get(port, b"\x00")
+    packet = IP(dst=host, ttl=profile.ttl) / UDP(dport=port) / payload  # type: ignore[operator]
     t0 = time.monotonic()
     response = sr1(packet, timeout=profile.probe_timeout, verbose=0)  # type: ignore[misc]
     rtt_us = (time.monotonic() - t0) * 1_000_000
@@ -487,7 +562,8 @@ def udp_connect_probe(host: str, port: int, timeout: float = 2.0, source_port: O
             if source_port is not None:
                 probe.setsockopt(sock.SOL_SOCKET, sock.SO_REUSEADDR, 1)
                 probe.bind(("", source_port))
-            probe.sendto(b"\x00", (host, port))
+            payload = UDP_PAYLOADS.get(port, b"\x00")
+            probe.sendto(payload, (host, port))
             try:
                 data, _ = probe.recvfrom(256)
                 rtt_us = (time.monotonic() - t0) * 1_000_000

@@ -28,7 +28,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from training.tools.scanner_probes import batch_syn_probe, connect_probe, syn_probe
+from training.tools.scanner_probes import async_batch_connect_probe, batch_syn_probe, connect_probe, syn_probe
 from training.tools.scanner_support import RAW_AVAILABLE, _print
 from training.tools.scanner_types import ACTIONS, FLAG_INDEX, INPUT_DIM, OUTPUT_DIM, PROFILES, PortResult, derive_runtime_profile
 from training.tools.scanner_utils import _normalize_result_text_fields, _recv_banner_chunks
@@ -269,20 +269,30 @@ class SpikeScanEngine:
                         for future in as_completed(futures):
                             batch_results.append(future.result())
                 else:
-                    if pool is None:
-                        pool = ThreadPoolExecutor(max_workers=batch_size)
-                    futures = {pool.submit(_dispatch_safe, port, action_name): (port, action_name) for port, action_name in zip(batch_ports, batch_actions)}
-                    batch_results = []
-                    for future in as_completed(futures):
-                        batch_results.append(future.result())
-
+                    if source_port is not None:
+                        # Fallback to ThreadPool if source_port is strictly required (asyncio open_connection doesn't support source_port binding natively without custom transports)
+                        if pool is None:
+                            pool = ThreadPoolExecutor(max_workers=batch_size)
+                        futures = {pool.submit(_dispatch_safe, port, action_name): (port, action_name) for port, action_name in zip(batch_ports, batch_actions)}
+                        batch_results = []
+                        for future in as_completed(futures):
+                            batch_results.append(future.result())
+                    else:
+                        batch_results = async_batch_connect_probe(host, batch_ports, timeout=self.profile.probe_timeout)
+                        
                 batch_results.sort(key=lambda result: result.port)
                 results.extend(batch_results)
                 if batch_results:
                     last = batch_results[-1]
                     last_flag = last.protocol_flag
                     last_rtt = last.rtt_us
-                    streak += sum(1 for result in batch_results if result.protocol_flag == "TIMEOUT")
+                    for result in batch_results:
+                        if result.protocol_flag == "TIMEOUT":
+                            streak += 1
+                        else:
+                            streak = 0
+                    
+
 
                 if probe_mode == "raw" and _raw_guard_enabled and not raw_guard_checked and port_index >= raw_guard_validate_after:
                     raw_guard_checked = True

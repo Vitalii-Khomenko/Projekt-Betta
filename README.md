@@ -4,9 +4,10 @@ Betta-Morpho is a research-grade neuromorphic scanner and telemetry platform.
 The project combines:
 
 - SNN-driven scanning logic
-- telemetry export and classifier training
-- enrichment and service fingerprinting from protocol probes plus Nmap-derived service metadata
+- telemetry export (CSV/JSON) and classifier training
+- enrichment and service fingerprinting from protocol-specific payloads (TCP/UDP) plus Nmap-derived service metadata
 - passive hostname/domain discovery and ranking
+- dynamic profile auto-tuning for stealth and evasion
 - report generation and Nmap verification
 - benchmark and experiment tracking
 
@@ -32,9 +33,9 @@ graph TD
 Main idea:
 
 - Python builds and evaluates model artifacts
-- Betta-Morpho runtime uses those artifacts during scanning
-- open-port naming starts with an internal service catalog built from local Nmap data, then improves labels with protocol-aware follow-up probes
-- scan results feed reports, verification, replay, and later retraining
+- Betta-Morpho runtime uses those artifacts during scanning and automatically tunes profiles for stealth when WAFs or rate-limits are detected
+- open-port naming starts with an internal service catalog built from local Nmap data, then improves labels with protocol-aware follow-up probes (e.g. targeted UDP payloads)
+- scan results feed CSV/JSON reports, verification, replay, and later retraining
 - benchmark and registry tooling track what changed between runs
 
 ## Quick Start

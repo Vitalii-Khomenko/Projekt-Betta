@@ -190,13 +190,14 @@ When prompted for ports, type the path with the `@` prefix:
 ## UDP
 
 Focused UDP probing is available as an additional pass.
+Betta-Morpho uses targeted payloads for common UDP services to elicit responses and improve accuracy:
 
-Use it for cases such as:
-
-- DNS
-- NTP
-- SNMP
-- IPsec-related ports
+- DNS (Version query)
+- NTP (v4 Client probe)
+- SNMP (v2c sysDescr query)
+- NetBIOS (NBSTAT probe)
+- OpenVPN, mDNS, SSDP, IPMI, IKEv1
+- Generic payloads for unknown ports
 
 Direct scanner example:
 
@@ -212,10 +213,11 @@ python training/tools/scanner.py scan \
 
 Main ideas:
 
-- `paranoid / sneaky / polite` reduce scan pressure
-- `--decoys` adds noise around the real probe path
-- `--spoof-ttl` and `--jitter-ms` make traffic less rigid
-- `--source-port` and `--retry-source-port` are specialized follow-up tricks
+- **Dynamic Auto-Tuning**: The SNN engine monitors for long timeout streaks (WAF or rate-limiting detection) and will automatically downgrade the profile to `sneaky` to maintain stealth.
+- `paranoid / sneaky / polite` reduce scan pressure manually.
+- `--decoys` adds noise around the real probe path.
+- `--spoof-ttl` and `--jitter-ms` make traffic less rigid.
+- `--source-port` and `--retry-source-port` are specialized follow-up tricks.
 
 Important:
 
@@ -246,6 +248,10 @@ python training/tools/scanner.py scan \
   --report artifacts/snn_model.json \
   --verify-with-nmap
 ```
+
+## JSON Export
+
+Betta-Morpho automatically generates a structured `_result.json` file alongside the CSV when you specify the `--output` or `--report` flag. This JSON export allows for easy programmatic ingestion into other tools like Nuclei, Metasploit, or custom vulnerability management dashboards.
 
 ## Passive Hostname Discovery
 

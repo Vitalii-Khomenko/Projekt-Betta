@@ -193,6 +193,36 @@ def export_csv(results: list[PortResult], path: Path, announce: bool = True) -> 
         _print(f"[bold green]Exported[/] {len(results)} rows: {path}")
 
 
+def export_json(results: list[PortResult], path: Path, announce: bool = True) -> None:
+    """Write scan results as a structured JSON array."""
+    data = []
+    for r in results:
+        data.append({
+            "asset_ip": r.host,
+            "target_port": r.port,
+            "state": r.state,
+            "protocol": r.protocol,
+            "protocol_flag": r.protocol_flag,
+            "service": r.service,
+            "service_version": r.service_version,
+            "technology": r.technology,
+            "banner": r.banner,
+            "cpe": r.cpe,
+            "cve_hint": r.cve_hint,
+            "rtt_us": r.rtt_us,
+            "payload_size": r.payload_size,
+            "timestamp_us": r.timestamp_us,
+            "response_entropy": r.response_entropy,
+            "tcp_window": r.tcp_window,
+            "scan_note": r.scan_note,
+        })
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+    if announce:
+        _print(f"[bold green]Exported JSON[/] {len(results)} rows: {path}")
+
+
 def export_html(
     results: list[PortResult],
     path: Path,
@@ -1040,6 +1070,8 @@ def main() -> int:
 
             if args.output:
                 export_csv(all_results, Path(args.output))
+                json_path = Path(args.output).with_suffix(".json")
+                export_json(all_results, json_path)
 
             if service_artifact and getattr(args, "active_learning_output", None):
                 try:
@@ -1095,6 +1127,7 @@ def main() -> int:
                     _print(f"[bold green][Betta-Morpho] classified:[/] " + "  ".join(f"{label}={count}" for label, count in sorted(counts.items())))
                     _print("[bold cyan][Betta-Morpho] Report files:[/]")
                     _print(f"  result.csv     : {args.output}")
+                    _print(f"  result.json    : {Path(args.output).with_suffix('.json')}")
                     _print(f"  classified.csv : {classified_path}")
                     _print(f"  report.html    : {args.html}")
                     if getattr(args, "discover_hostnames", False):

@@ -491,16 +491,25 @@ def _build_scan_args_interactive() -> list[str]:
         "Use larger ranges after the workflow is stable.",
     )
     target = prompt_text("Target IP / CIDR / range / comma-list", "10.10.10.5")
-    _raw_ports = prompt_text("TCP ports (top100, top20, 1-1000, 22,80,443, 'all' = full 1-65535)", "top100")
-    ports = "1-65535" if _raw_ports.strip().lower() == "all" else _raw_ports
+    _raw_ports = prompt_text("TCP ports (top1000, top100, top20, 1-1000, 22,80,443, 'all')", "top1000")
+    if _raw_ports.strip().lower() == "all":
+        ports = "1-65535"
+    elif _raw_ports.strip().lower() == "top1000":
+        ports = "@Ports/1000.txt"
+    else:
+        ports = _raw_ports
     udp_ports = ""
     if scan_scope in {"tcp_udp", "advanced"}:
         _print_panel(
             "UDP Ports",
             "UDP probing is targeted, not a blind full-range replacement for TCP scanning.\n"
-            "Use focused ports such as 53,67,68,69,123,161,500 or your own specific list.",
+            "Use focused ports such as 53,67,68,69,123,161,500 or type 'top1000' to use the 1000.txt file.",
         )
-        udp_ports = prompt_text("UDP ports (comma list or ranges, blank to skip)", "53,123,161")
+        _raw_udp = prompt_text("UDP ports (top1000, comma list or ranges, blank to skip)", "top1000")
+        if _raw_udp.strip().lower() == "top1000":
+            udp_ports = "@Ports/1000.txt"
+        else:
+            udp_ports = _raw_udp
     _show_question_hint(
         "Speed Choice",
         "Preset speeds are easiest for most work.\n"
