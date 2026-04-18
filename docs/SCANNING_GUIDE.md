@@ -76,6 +76,16 @@ python launcher.py scan \
   --report artifacts/snn_model.json
 ```
 
+Scan using a predefined port file (TCP/UDP sections supported):
+
+```bash
+python launcher.py scan \
+  --target 10.129.51.85 \
+  --ports @Ports/1000.txt \
+  --ports-udp @Ports/1000.txt \
+  --profile normal
+```
+
 What this gives you:
 
 - partial result persistence
@@ -144,6 +154,38 @@ python launcher.py scan \
   --checkpoint-every 1000 \
   --report artifacts/snn_model.json
 ```
+
+## Scanning from Port Files
+
+Betta-Morpho supports loading ports from external files using the `@` prefix. This is especially useful for large, curated port sets or when reusing specific lists across multiple targets.
+
+### File Format
+
+The parser supports both simple newline/comma separated lists and structured files with `TCP` and `UDP` headers:
+
+```text
+TCP
+21,22,23,80,443
+
+UDP
+53,67,68,123,161
+```
+
+If no headers are found, the entire file is treated as a single list for the requested protocol.
+
+### Usage Examples
+
+**CLI:**
+```bash
+python launcher.py scan \
+  --target 10.129.51.85 \
+  --ports @Ports/1000.txt \
+  --ports-udp @Ports/1000.txt
+```
+
+**Interactive Wizard:**
+When prompted for ports, type the path with the `@` prefix:
+`TCP ports (top100, ...): @Ports/1000.txt`
 
 ## UDP
 

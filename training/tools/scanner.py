@@ -28,6 +28,7 @@ import sqlite3
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -647,7 +648,7 @@ def interactive_scanner() -> int:
 
     artifact_path = Path(artifact_str) if artifact_str else None
     targets = parse_targets(target_spec)
-    ports = parse_ports(port_spec)
+    ports = parse_ports(port_spec, protocol="tcp")
     engine = SpikeScanEngine(profile=profile_name, artifact=artifact_path, speed_level=speed_level)
     decoys = _random_decoys(3) if use_decoys else None
 
@@ -929,7 +930,7 @@ def main() -> int:
                 args.host_discovery_html = str(_session_output_path(args.output, "hostnames_report", ".html"))
 
         targets = parse_targets(args.target)
-        ports = parse_ports(args.ports)
+        ports = parse_ports(args.ports, protocol="tcp")
         source_ports_to_check = []
         if args.source_port is not None:
             source_ports_to_check.append(("primary", args.source_port, bool(args.ports_udp)))
@@ -950,7 +951,7 @@ def main() -> int:
 
         engine = SpikeScanEngine(profile=args.profile, artifact=artifact, speed_level=args.speed_level)
         decoys = _random_decoys(3) if args.decoys else None
-        udp_ports = parse_ports(args.ports_udp) if args.ports_udp else []
+        udp_ports = parse_ports(args.ports_udp, protocol="udp") if args.ports_udp else []
 
         stealth_info = []
         if args.spoof_ttl:
@@ -1011,11 +1012,16 @@ def main() -> int:
                 )
                 if udp_ports:
                     _print(f"[dim]  UDP pass: {len(udp_ports)} ports ...[/]")
-                    for udp_port in udp_ports:
+                    
+                    def _do_udp(p: int):
                         if RAW_AVAILABLE and not args.connect_only:
-                            host_results.append(udp_probe(host, udp_port, engine.profile))
-                        else:
-                            host_results.append(udp_connect_probe(host, udp_port, timeout=engine.profile.probe_timeout, source_port=args.source_port))
+                            return udp_probe(host, p, engine.profile)
+                        return udp_connect_probe(host, p, timeout=engine.profile.probe_timeout, source_port=args.source_port)
+                    
+                    with ThreadPoolExecutor(max_workers=min(32, len(udp_ports))) as pool:
+                        futures = {pool.submit(_do_udp, p): p for p in udp_ports}
+                        for future in as_completed(futures):
+                            host_results.append(future.result())
                 if args.retry_source_port is not None:
                     _print(f"[dim]  Source-port retry: filtered TCP ports via {args.retry_source_port} ...[/]")
                     retried_count, changed_count = retry_filtered_tcp_with_source_port(

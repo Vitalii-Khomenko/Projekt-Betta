@@ -20,6 +20,7 @@ from __future__ import annotations
 import ipaddress
 import random
 import time
+from pathlib import Path
 from typing import Optional
 
 from training.tools.scanner_support import ICMP, IP, TCP, UDP, SCAPY_AVAILABLE, _print, send, sr, sr1
@@ -575,7 +576,35 @@ def parse_targets(spec: str) -> list[str]:
     return targets
 
 
-def parse_ports(spec: str) -> list[int]:
+def _parse_ports_from_file(path: Path, protocol: str = "tcp") -> list[int]:
+    """Reads ports from a file, optionally filtering by protocol (TCP/UDP) headers."""
+    try:
+        lines = path.read_text().splitlines()
+        target_proto = protocol.upper()
+        current_proto = "TCP"  # Default if no header
+        relevant_lines = []
+        has_headers = any(line.strip().upper() in {"TCP", "UDP"} for line in lines)
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.upper() in {"TCP", "UDP"}:
+                current_proto = line.upper()
+                continue
+            if not has_headers or current_proto == target_proto:
+                relevant_lines.append(line)
+
+        return parse_ports(",".join(relevant_lines))
+    except Exception:
+        return []
+
+
+def parse_ports(spec: str, protocol: str = "tcp") -> list[int]:
+    """Parses a port specification string (top100, 22,80, 1-1024, or @file.txt)."""
+    if spec.startswith("@"):
+        return _parse_ports_from_file(Path(spec[1:]), protocol=protocol)
+
     lowered = spec.lower()
     if lowered in {"top100", "top-100"}:
         return list(TOP100_PORTS)
@@ -584,10 +613,18 @@ def parse_ports(spec: str) -> list[int]:
     ports: list[int] = []
     for part in spec.split(","):
         part = part.strip()
+        if not part:
+            continue
         if "-" in part:
             low, _, high = part.partition("-")
-            ports.extend(range(int(low), int(high) + 1))
+            try:
+                ports.extend(range(int(low), int(high) + 1))
+            except (ValueError, TypeError):
+                continue
         else:
-            ports.append(int(part))
+            try:
+                ports.append(int(part))
+            except (ValueError, TypeError):
+                continue
     return sorted(set(ports))
 

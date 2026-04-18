@@ -111,6 +111,15 @@ python launcher.py scan \
   --report artifacts/snn_model.json
 ```
 
+Scan using a predefined port list (supports TCP/UDP sections):
+
+```bash
+python launcher.py scan \
+  --target 10.129.51.85 \
+  --ports @Ports/1000.txt \
+  --ports-udp @Ports/1000.txt
+```
+
 Verify Betta-Morpho findings with Nmap:
 
 ```bash

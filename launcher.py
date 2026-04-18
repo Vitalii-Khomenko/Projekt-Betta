@@ -487,6 +487,7 @@ def _build_scan_args_interactive() -> list[str]:
         "- 10.10.10.5,10.10.10.6\n\n"
         "For ports, start with top20 or top100 if you are learning or validating behavior.\n"
         "Type 'all' to scan the full port range 1-65535 without typing it manually.\n"
+        "To load ports from a file, use the '@' prefix (e.g. @Ports/1000.txt).\n"
         "Use larger ranges after the workflow is stable.",
     )
     target = prompt_text("Target IP / CIDR / range / comma-list", "10.10.10.5")
@@ -1052,6 +1053,7 @@ def _scanner_launch_menu() -> int:
                 ("3", "Passive hostname discovery from saved scan", "Extract and rank hostnames/domains from existing scan results"),
                 ("4", "Run lab services", "Start local lab listeners for scanner practice"),
                 ("5", "Exercise lab traffic", "Generate controlled traffic against local lab services"),
+                ("6", "Scan ports from file (1000 ports)", "Shortcut to scan using the predefined Ports/1000.txt list"),
                 ("0", "Back", "Return to the main launcher"),
             ],
             "1",
@@ -1077,6 +1079,32 @@ def _scanner_launch_menu() -> int:
             if nmap_extra:
                 verify_args.extend(["--nmap-extra", nmap_extra])
             return run_script("tools/verify_scan.py", verify_args)
+        if choice == "6":
+            _print_panel(
+                "Scan Ports From File",
+                "This shortcut uses Ports/1000.txt which contains structured TCP and UDP port lists.\n"
+                "The SNN scanner will iterate through both protocols using its neuromorphic timing."
+            )
+            target = prompt_text("Target IP", "10.129.51.85")
+            profile = prompt_text("Scan profile (normal/aggressive/x5/x10/x15/sneaky)", "normal")
+            transport = "connect" if prompt_bool("Use Connect-only mode (safer/faster for VMs)->", True) else "auto"
+            
+            scan_args = [
+                "scan",
+                "--target", target,
+                "--profile", profile,
+                "--ports", "@Ports/1000.txt",
+                "--ports-udp", "@Ports/1000.txt",
+                "--report", "artifacts/snn_model.json",
+                "--verify-with-nmap",
+                "--no-discovery"
+            ]
+            if transport == "connect":
+                scan_args.append("--connect-only")
+
+            if prompt_bool(f"Run scan against {target} with 1000 ports file now->", True):
+                return run_script("training/tools/scanner.py", scan_args)
+            return 0
         if choice == "3":
             arguments = [
                 "discover",
