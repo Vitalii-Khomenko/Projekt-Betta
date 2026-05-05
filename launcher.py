@@ -68,6 +68,8 @@ ROOT = Path(__file__).resolve().parent
 SPEC_PATH = ROOT / "docs" / "Engineering_Draft.md"
 DEFAULT_DATASET = "data/synthetic_dataset.csv"
 DEFAULT_REPLAY_DIR = "data/scans"
+DEFAULT_MAX_TARGETS = 4096
+DEFAULT_NMAP_TIMEOUT_SECONDS = 900
 LAB_SERVICES_SCRIPT = "tools/lab_services.py"
 LAB_EXERCISE_SCRIPT = "tools/lab_exercise.py"
 CONSOLE = Console() if RICH_AVAILABLE and Console is not None else None
@@ -586,8 +588,10 @@ def _build_scan_args_interactive() -> list[str]:
     verify_with_nmap = prompt_bool("Run targeted Nmap verification as a separate post-scan step->", False)
     nmap_preset = "deep"
     nmap_extra = ""
+    nmap_timeout = DEFAULT_NMAP_TIMEOUT_SECONDS
     if verify_with_nmap:
         nmap_preset, nmap_extra = _choose_nmap_config()
+        nmap_timeout = prompt_int("Nmap timeout seconds", DEFAULT_NMAP_TIMEOUT_SECONDS)
     checkpoint_every = prompt_int("Checkpoint every N ports", 1000)
     skip_discovery = prompt_bool("Skip host discovery->", False)
     use_decoys = prompt_bool("Enable decoy packets->", False)
@@ -601,6 +605,7 @@ def _build_scan_args_interactive() -> list[str]:
     progress_log = ""
     active_learning_output = ""
     active_learning_threshold = 0.65
+    max_targets = DEFAULT_MAX_TARGETS
     no_classify = False
     if advanced_options:
         _print_panel(
@@ -615,6 +620,7 @@ def _build_scan_args_interactive() -> list[str]:
             source_port = prompt_int("Source port", 53)
         if prompt_bool("Retry filtered TCP ports with a second source port->", False):
             retry_source_port = prompt_int("Retry source port", 443)
+        max_targets = prompt_int("Max expanded targets from CIDR/range (0 = no limit)", DEFAULT_MAX_TARGETS)
         if prompt_bool("Save adapted scanner weights after the run->", False):
             save_weights = prompt_text("Save-weights artifact", "artifacts/scanner_adapted.json")
         if prompt_bool("Write active-learning service rows to a custom file->", False):
@@ -633,6 +639,7 @@ def _build_scan_args_interactive() -> list[str]:
         "--profile", profile,
         "--artifact", scanner_artifact,
         "--checkpoint-every", str(checkpoint_every),
+        "--max-targets", str(max_targets),
     ]
     if speed_level is not None:
         args.extend(["--speed-level", str(speed_level)])
@@ -661,6 +668,7 @@ def _build_scan_args_interactive() -> list[str]:
         args.extend(["--nmap-preset", nmap_preset])
         if nmap_extra:
             args.extend(["--nmap-extra", nmap_extra])
+        args.extend(["--nmap-timeout", str(nmap_timeout)])
     if transport_mode == "connect":
         args.append("--connect-only")
     if skip_discovery:
@@ -695,6 +703,7 @@ def _build_fast_start_scan_args(target: str) -> list[str]:
         "--profile", "aggressive",
         "--speed-level", str(MAX_MANUAL_SPEED_LEVEL),
         "--checkpoint-every", "0",
+        "--max-targets", str(DEFAULT_MAX_TARGETS),
         "--no-discovery",
         "--minimal-output",
         "--fast-start-stats",
@@ -709,6 +718,8 @@ def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
         "--profile", args.profile,
         "--checkpoint-every", str(args.checkpoint_every),
     ]
+    if getattr(args, "max_targets", None) is not None:
+        scan_args.extend(["--max-targets", str(args.max_targets)])
     if getattr(args, "ports_udp", ""):
         scan_args.extend(["--ports-udp", args.ports_udp])
     if getattr(args, "speed_level", None) is not None:
@@ -749,7 +760,7 @@ def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
         nmap_extra = getattr(args, "nmap_extra", "")
         if nmap_extra:
             scan_args.extend(["--nmap-extra", nmap_extra])
-        scan_args.extend(["--nmap-timeout", str(getattr(args, "nmap_timeout", 900))])
+        scan_args.extend(["--nmap-timeout", str(getattr(args, "nmap_timeout", DEFAULT_NMAP_TIMEOUT_SECONDS))])
     if getattr(args, "save_weights", None):
         scan_args.extend(["--save-weights", args.save_weights])
     if getattr(args, "spoof_ttl", None) is not None:
@@ -1117,7 +1128,7 @@ def _scanner_launch_menu() -> int:
             verify_args = ["--scan-csv", scan_csv, "--nmap-preset", nmap_preset]
             if nmap_extra:
                 verify_args.extend(["--nmap-extra", nmap_extra])
-            verify_args.extend(["--nmap-timeout", str(prompt_int("Nmap timeout seconds", 900))])
+            verify_args.extend(["--nmap-timeout", str(prompt_int("Nmap timeout seconds", DEFAULT_NMAP_TIMEOUT_SECONDS))])
             return run_script("tools/verify_scan.py", verify_args)
         if choice == "7":
             _print_panel(
@@ -1332,6 +1343,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="IP / CIDR / range / comma list")
     scan.add_argument("--ports", default="top100",
                       help="top100 | top20 | 22,80 | 1-1024")
+    scan.add_argument("--max-targets", type=int, default=DEFAULT_MAX_TARGETS,
+                      help="Maximum targets to expand from CIDR/range input; use 0 for no limit")
     scan.add_argument("--ports-udp", default="",
                       help="Optional UDP ports, for example 53,123,161")
     scan.add_argument("--profile", default="normal",
@@ -1375,7 +1388,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Named Nmap flag preset for verification (deep/quick/stealth/scripts-only/aggressive/udp/os-detect/vuln)")
     scan.add_argument("--nmap-extra", default="",
                       help="Extra Nmap flags appended after the preset, space-separated")
-    scan.add_argument("--nmap-timeout", type=int, default=900,
+    scan.add_argument("--nmap-timeout", type=int, default=DEFAULT_NMAP_TIMEOUT_SECONDS,
                       help="Abort Nmap verification after N seconds")
     scan.add_argument("--save-weights", default=None,
                       help="Save adapted scanner weights after the run")

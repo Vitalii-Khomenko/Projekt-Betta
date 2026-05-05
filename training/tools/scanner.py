@@ -41,7 +41,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from training.tools.scanner_engine import SpikeScanEngine, train_scanner_snn
 from training.tools.scanner_enrichment import enrich_port_results, export_active_learning_rows
-from training.tools.scanner_probes import discover_hosts, parse_ports, parse_targets, retry_filtered_tcp_with_source_port, udp_connect_probe, udp_probe
+from training.tools.scanner_probes import MAX_TARGETS, discover_hosts, parse_ports, parse_targets, retry_filtered_tcp_with_source_port, udp_connect_probe, udp_probe
 from training.tools.scanner_support import Panel, Prompt, RICH, SCAPY_AVAILABLE, _C, _print, detect_service, load_service_artifact, RAW_AVAILABLE
 from training.tools.scanner_types import MAX_MANUAL_SPEED_LEVEL, MIN_MANUAL_SPEED_LEVEL, PROFILES, PortResult
 from training.tools.scanner_utils import _normalize_result_text_fields, _shannon_entropy
@@ -755,8 +755,12 @@ def interactive_scanner() -> int:
         return 1
 
     artifact_path = Path(artifact_str) if artifact_str else None
-    targets = parse_targets(target_spec)
-    ports = parse_ports(port_spec, protocol="tcp")
+    try:
+        targets = parse_targets(target_spec)
+        ports = parse_ports(port_spec, protocol="tcp")
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: invalid scan input: {exc}")
+        return 2
     engine = SpikeScanEngine(profile=profile_name, artifact=artifact_path, speed_level=speed_level)
     decoys = _random_decoys(3) if use_decoys else None
 
@@ -894,6 +898,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan_cmd = subcommands.add_parser("scan", help="Run an SNN-driven host/port scan")
     scan_cmd.add_argument("--target", required=True, help="IP / CIDR / range / comma list")
     scan_cmd.add_argument("--ports", default="top100")
+    scan_cmd.add_argument("--max-targets", type=int, default=MAX_TARGETS, metavar="N", help="Maximum targets to expand from CIDR/range input; use 0 for no limit")
     scan_cmd.add_argument("--profile", default="normal", choices=list(PROFILES), help="Scan mode / speed preset")
     scan_cmd.add_argument(
         "--speed-level",
@@ -1044,7 +1049,7 @@ def main() -> int:
                 args.host_discovery_html = str(_session_output_path(args.output, "hostnames_report", ".html"))
 
         try:
-            targets = parse_targets(args.target)
+            targets = parse_targets(args.target, max_targets=int(getattr(args, "max_targets", MAX_TARGETS)))
             ports = parse_ports(args.ports, protocol="tcp")
             if not ports:
                 raise ValueError(f"no TCP ports resolved from {args.ports!r}")

@@ -40,7 +40,18 @@ class LauncherSmokeTests(unittest.TestCase):
             ["discover-hostnames", "data/scans/example_result.csv", "--output", "data/scans/example_hostnames.csv"]
         )
         scan_args = parser.parse_args(
-            ["scan", "--target", "127.0.0.1", "--discover-hostnames", "--minimal-output", "--fast-start-stats"]
+            [
+                "scan",
+                "--target",
+                "127.0.0.1",
+                "--discover-hostnames",
+                "--minimal-output",
+                "--fast-start-stats",
+                "--max-targets",
+                "128",
+                "--nmap-timeout",
+                "321",
+            ]
         )
 
         self.assertEqual(discover_args.inputs, ["data/scans/example_result.csv"])
@@ -48,6 +59,8 @@ class LauncherSmokeTests(unittest.TestCase):
         self.assertTrue(scan_args.discover_hostnames)
         self.assertTrue(scan_args.minimal_output)
         self.assertTrue(scan_args.fast_start_stats)
+        self.assertEqual(scan_args.max_targets, 128)
+        self.assertEqual(scan_args.nmap_timeout, 321)
 
     def test_fast_start_scan_args_are_full_tcp_aggressive_minimal(self) -> None:
         args = launcher._build_fast_start_scan_args("10.10.10.5")
@@ -57,6 +70,7 @@ class LauncherSmokeTests(unittest.TestCase):
         self.assertEqual(args[args.index("--ports") + 1], "1-65535")
         self.assertEqual(args[args.index("--profile") + 1], "aggressive")
         self.assertEqual(args[args.index("--speed-level") + 1], "300")
+        self.assertEqual(args[args.index("--max-targets") + 1], "4096")
         self.assertIn("--no-discovery", args)
         self.assertIn("--minimal-output", args)
         self.assertIn("--fast-start-stats", args)
