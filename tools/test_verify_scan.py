@@ -133,6 +133,35 @@ class VerifyScanTests(unittest.TestCase):
         self.assertIn("<td>1</td>", html)
         self.assertNotIn("<td>Linux</td>", html)
 
+    def test_export_html_renders_verification_timeout_status(self) -> None:
+        result = PortResult(
+            host="127.0.0.1",
+            port=22,
+            state="open",
+            protocol="tcp",
+            protocol_flag="SYN_ACK",
+            rtt_us=900.0,
+            payload_size=0,
+            timestamp_us=1,
+        )
+        verification_summary = {
+            "verification_status": "timeout",
+            "verification_error": "nmap timed out after 1 seconds",
+            "matched_ports": [],
+            "betta_morpho_only_ports": [22],
+            "nmap_only_ports": [],
+            "verified_os_hints": [],
+            "rows": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            html_path = Path(tmp_dir) / "report.html"
+            export_html([result], html_path, verification_summary=verification_summary)
+            html = html_path.read_text(encoding="utf-8")
+
+        self.assertIn("<b>Status:</b> timeout", html)
+        self.assertIn("Verification error: nmap timed out after 1 seconds", html)
+
 
 if __name__ == "__main__":
     unittest.main()

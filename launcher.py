@@ -732,6 +732,8 @@ def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
         scan_args.extend(["--service-catalog", args.service_catalog])
     if getattr(args, "transport", "auto") == "connect":
         scan_args.append("--connect-only")
+    if getattr(args, "dry_run", False):
+        scan_args.append("--dry-run")
     if getattr(args, "minimal_output", False):
         scan_args.append("--minimal-output")
     if getattr(args, "fast_start_stats", False):
@@ -1347,6 +1349,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Maximum targets to expand from CIDR/range input; use 0 for no limit")
     scan.add_argument("--ports-udp", default="",
                       help="Optional UDP ports, for example 53,123,161")
+    scan.add_argument("--dry-run", action="store_true",
+                      help="Resolve and validate targets/ports, then exit without probing")
     scan.add_argument("--profile", default="normal",
                       choices=["paranoid", "sneaky", "polite", "normal", "aggressive", "x5", "x10", "x15"],
                       help="Scan mode / speed preset")

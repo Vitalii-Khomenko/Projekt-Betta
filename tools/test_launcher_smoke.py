@@ -47,6 +47,7 @@ class LauncherSmokeTests(unittest.TestCase):
                 "--discover-hostnames",
                 "--minimal-output",
                 "--fast-start-stats",
+                "--dry-run",
                 "--max-targets",
                 "128",
                 "--nmap-timeout",
@@ -59,6 +60,7 @@ class LauncherSmokeTests(unittest.TestCase):
         self.assertTrue(scan_args.discover_hostnames)
         self.assertTrue(scan_args.minimal_output)
         self.assertTrue(scan_args.fast_start_stats)
+        self.assertTrue(scan_args.dry_run)
         self.assertEqual(scan_args.max_targets, 128)
         self.assertEqual(scan_args.nmap_timeout, 321)
 

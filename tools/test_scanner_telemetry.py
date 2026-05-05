@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from training.tools.scanner_enrichment import export_active_learning_rows
+from training.tools import scanner
 from training.tools.scanner import FastStartStats, display_results, export_html
 from training.tools.scanner_types import (
     MAX_MANUAL_SPEED_LEVEL,
@@ -211,6 +212,30 @@ class ScannerTelemetryTests(unittest.TestCase):
         self.assertIn("tx=", output)
         self.assertIn("rx=", output)
         self.assertIn("req/s=", output)
+
+    def test_scan_dry_run_resolves_inputs_without_probe_engine(self) -> None:
+        stream = io.StringIO()
+        argv = [
+            "scanner.py",
+            "scan",
+            "--target",
+            "127.0.0.1",
+            "--ports",
+            "22,80",
+            "--dry-run",
+        ]
+        with (
+            patch.object(sys, "argv", argv),
+            patch("sys.stdout", stream),
+            patch("training.tools.scanner.SpikeScanEngine", side_effect=AssertionError("dry-run must not create engine")),
+        ):
+            code = scanner.main()
+
+        output = stream.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("Dry run: no probes sent.", output)
+        self.assertIn("targets=1", output)
+        self.assertIn("tcp_ports=2", output)
 
 
 if __name__ == "__main__":

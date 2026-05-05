@@ -266,6 +266,9 @@ def export_html(
     verification_columns = ""
     mismatch_button = ""
     if verification_summary:
+        verification_status = _html.escape(str(verification_summary.get("verification_status", "complete")))
+        verification_error = _html.escape(str(verification_summary.get("verification_error", "")).strip())
+        verification_error_line = f'<div class="meta">Verification error: {verification_error}</div>' if verification_error else ""
         matched_ports = ", ".join(str(port) for port in verification_summary.get("matched_ports", [])) or "-"
         betta_only_ports = ", ".join(str(port) for port in verification_summary.get("betta_morpho_only_ports", [])) or "-"
         nmap_only_ports = ", ".join(str(port) for port in verification_summary.get("nmap_only_ports", [])) or "-"
@@ -274,12 +277,14 @@ def export_html(
         verification_panel = f"""
 <div class="summary">
   <b>Nmap Control:</b> verified only Betta-Morpho-open ports &nbsp;|&nbsp;
+  <b>Status:</b> {verification_status} &nbsp;|&nbsp;
   <b>Matched:</b> {len(verification_summary.get('matched_ports', []))} &nbsp;|&nbsp;
   <b>Betta-Morpho only:</b> {len(verification_summary.get('betta_morpho_only_ports', []))} &nbsp;|&nbsp;
   <b>Nmap only:</b> {len(verification_summary.get('nmap_only_ports', []))}
   <div class="meta" style="margin-top:8px">Matched ports: {matched_ports}</div>
   <div class="meta">Betta-Morpho only: {betta_only_ports}</div>
   <div class="meta">Nmap only: {nmap_only_ports}</div>
+  {verification_error_line}
 </div>"""
 
     def state_value(result: PortResult) -> str:
@@ -715,6 +720,30 @@ def display_results(results: list[PortResult], minimal: bool = False) -> None:
         print(f"Total: {len(open_results)} open / {len(results)} probed")
 
 
+def _preview_values(values: list[object], limit: int = 12) -> str:
+    if not values:
+        return "-"
+    shown = ", ".join(str(value) for value in values[:limit])
+    if len(values) > limit:
+        shown += f", ... (+{len(values) - limit} more)"
+    return shown
+
+
+def _verification_failure_summary(status: str, exc: BaseException, all_results: list[PortResult]) -> dict[str, object]:
+    open_ports = sorted({result.port for result in all_results if result.protocol_flag == "SYN_ACK"})
+    return {
+        "verification_status": status,
+        "verification_error": str(exc),
+        "betta_morpho_open_ports": open_ports,
+        "nmap_open_ports": [],
+        "matched_ports": [],
+        "betta_morpho_only_ports": open_ports,
+        "nmap_only_ports": [],
+        "verified_os_hints": [],
+        "rows": [],
+    }
+
+
 def interactive_scanner() -> int:
     if not SCAPY_AVAILABLE:
         print("ERROR: scapy not installed - pip install scapy")
@@ -912,6 +941,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan_cmd.add_argument("--service-catalog", default=str(PROJECT_ROOT / "artifacts" / "service_catalog.json"), help="Internal service catalog artifact used for service normalization")
     scan_cmd.add_argument("--decoys", action="store_true")
     scan_cmd.add_argument("--no-discovery", action="store_true")
+    scan_cmd.add_argument("--dry-run", action="store_true", help="Resolve and validate targets/ports, then exit without probing")
     scan_cmd.add_argument("--output", help="Export results CSV")
     scan_cmd.add_argument("--save-weights", metavar="PATH", help="Save adapted SNN weights to JSON after scan")
     scan_cmd.add_argument(
@@ -985,7 +1015,8 @@ def main() -> int:
         return 0
 
     if args.cmd == "scan":
-        if not SCAPY_AVAILABLE:
+        dry_run = bool(getattr(args, "dry_run", False))
+        if not SCAPY_AVAILABLE and not dry_run:
             print("ERROR: scapy not installed - pip install scapy")
             return 1
 
@@ -997,7 +1028,7 @@ def main() -> int:
         service_artifact: dict | None = None
         verification_summary: dict | None = None
 
-        if getattr(args, "service_artifact", None):
+        if getattr(args, "service_artifact", None) and not dry_run:
             try:
                 service_artifact = load_service_artifact(args.service_artifact)
             except (FileNotFoundError, OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
@@ -1005,7 +1036,7 @@ def main() -> int:
 
         report_classifier: Path | None = Path(args.report) if getattr(args, "report", None) else None
 
-        if report_classifier is not None:
+        if report_classifier is not None and not dry_run:
             output_paths = build_report_bundle_paths(
                 PROJECT_ROOT / "data" / "scans",
                 args.target,
@@ -1025,7 +1056,7 @@ def main() -> int:
                 args.host_discovery_html = str(output_paths["hostnames_html"])
             if not minimal_output:
                 _print(f"[bold cyan][Betta-Morpho] Output dir:[/] {report_dir}")
-        elif not args.output and not minimal_output:
+        elif not args.output and not minimal_output and not dry_run:
             output_paths = build_scan_output_paths(PROJECT_ROOT / "data" / "scans", args.target)
             report_dir = Path(output_paths["dir"])
             report_dir.mkdir(parents=True, exist_ok=True)
@@ -1040,7 +1071,7 @@ def main() -> int:
                 args.host_discovery_output = str(output_paths["hostnames_csv"])
                 args.host_discovery_html = str(output_paths["hostnames_html"])
             _print(f"[bold cyan][Betta-Morpho] Output dir:[/] {report_dir}")
-        elif args.output and not getattr(args, "progress_log", None) and not minimal_output:
+        elif args.output and not getattr(args, "progress_log", None) and not minimal_output and not dry_run:
             args.progress_log = str(_session_output_path(args.output, "progress", ".log"))
         if getattr(args, "discover_hostnames", False):
             if not getattr(args, "host_discovery_output", None):
@@ -1059,6 +1090,15 @@ def main() -> int:
         except (OSError, ValueError) as exc:
             print(f"ERROR: invalid scan input: {exc}")
             return 2
+        if dry_run:
+            print("Dry run: no probes sent.")
+            print(f"targets={len(targets)} preview={_preview_values(targets)}")
+            print(f"tcp_ports={len(ports)} preview={_preview_values(ports)}")
+            if args.ports_udp:
+                print(f"udp_ports={len(udp_ports)} preview={_preview_values(udp_ports)}")
+            print(f"profile={args.profile}" + (f" speed-level={args.speed_level}" if args.speed_level is not None else ""))
+            print(f"max_targets={getattr(args, 'max_targets', MAX_TARGETS)}")
+            return 0
         source_ports_to_check = []
         if args.source_port is not None:
             source_ports_to_check.append(("primary", args.source_port, bool(args.ports_udp)))
@@ -1218,7 +1258,11 @@ def main() -> int:
                                 + f"betta_only={len(verification_summary.get('betta_morpho_only_ports', []))} "
                                 + f"nmap_only={len(verification_summary.get('nmap_only_ports', []))}"
                             )
-                    except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                    except subprocess.TimeoutExpired as exc:
+                        verification_summary = _verification_failure_summary("timeout", exc, all_results)
+                        _print(f"[yellow][Betta-Morpho] Nmap verification timed out: {exc}[/]")
+                    except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError) as exc:
+                        verification_summary = _verification_failure_summary("skipped", exc, all_results)
                         _print(f"[yellow][Betta-Morpho] Nmap verification skipped: {exc}[/]")
                 else:
                     _print("[yellow][Betta-Morpho] Nmap verification skipped: requires --output or --report.[/]")
