@@ -96,7 +96,6 @@ def run_script(script: str, arguments: list[str]) -> int:
     try:
         return subprocess.call([preferred_python(), str(script_path)] + arguments, cwd=ROOT)
     except KeyboardInterrupt:
-        print(f"Interrupted: {script}")
         return 130
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,11 +29,13 @@ import launcher
 
 
 class LauncherInterruptTests(unittest.TestCase):
-    def test_run_script_returns_130_on_keyboard_interrupt(self) -> None:
-        with patch("launcher.subprocess.call", side_effect=KeyboardInterrupt):
+    def test_run_script_returns_130_quietly_on_keyboard_interrupt(self) -> None:
+        stdout = StringIO()
+        with patch("launcher.subprocess.call", side_effect=KeyboardInterrupt), patch("sys.stdout", stdout):
             code = launcher.run_script("training/tools/scanner.py", [])
 
         self.assertEqual(code, 130)
+        self.assertEqual(stdout.getvalue(), "")
 
 
 if __name__ == "__main__":

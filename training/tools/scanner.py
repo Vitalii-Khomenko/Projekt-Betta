@@ -517,8 +517,8 @@ class FastStartStats:
         line = (
             f"\r{_format_progress_bar(scanned_ports, total_ports)} "
             f"{percent:5.1f}%  ports={scanned_ports}/{total_ports}  "
-            f"time={_format_elapsed(elapsed)}  tx={tx_kb:.1f}KB  rx={rx_kb:.1f}KB  "
-            f"req/s={requests_per_second:.1f}"
+            f"time={_format_elapsed(elapsed)}  est_tx={tx_kb:.1f}KB  est_rx={rx_kb:.1f}KB  "
+            f"ports/s={requests_per_second:.1f}"
         )
         if new_open_results:
             if self._last_line_len == 0:
@@ -1366,6 +1366,10 @@ def main() -> int:
         except KeyboardInterrupt:
             progress_writer.abort(len(all_results))
             return 130
+        except RuntimeError as exc:
+            progress_writer.abort(len(all_results))
+            _print(f"[red][Betta-Morpho] Scan stopped:[/] {exc}")
+            return 2
 
     if args.cmd == "classify-results":
         data_path = Path(args.data)

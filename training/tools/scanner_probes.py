@@ -17,6 +17,7 @@
 # =============================================================================
 from __future__ import annotations
 
+import errno
 import ipaddress
 import random
 import time
@@ -30,6 +31,13 @@ from training.tools.scanner_utils import _append_scan_note, _clean_probe_text, _
 MIN_PORT = 1
 MAX_PORT = 65535
 MAX_TARGETS = 4096
+LOCAL_SOCKET_EXHAUSTED_NOTE = "local-socket-exhausted"
+_LOCAL_SOCKET_EXHAUSTION_ERRNOS = {
+    errno.EADDRNOTAVAIL,
+    errno.ENOBUFS,
+    errno.EMFILE,
+    errno.ENFILE,
+}
 
 try:
     import dns.exception as dns_exception
@@ -130,7 +138,28 @@ def connect_probe(host: str, port: int, timeout: float = 1.0, source_port: Optio
         return PortResult(host, port, "filtered", "tcp", "TIMEOUT", rtt_us, 0, ts_us)
 
 
-async def _async_connect_probe(host: str, port: int, timeout: float, ts_us: int) -> PortResult:
+def _is_local_socket_exhaustion(exc: OSError) -> bool:
+    if exc.errno in _LOCAL_SOCKET_EXHAUSTION_ERRNOS:
+        return True
+    message = str(exc).lower()
+    return any(
+        token in message
+        for token in (
+            "cannot assign requested address",
+            "address not available",
+            "no buffer space",
+            "too many open files",
+        )
+    )
+
+
+async def _async_connect_probe(
+    host: str,
+    port: int,
+    timeout: float,
+    ts_us: int,
+    banner_timeout: float | None = None,
+) -> PortResult:
     import asyncio
     import time
     _validate_port(port, "tcp")
@@ -144,14 +173,16 @@ async def _async_connect_probe(host: str, port: int, timeout: float, ts_us: int)
         banner = ""
         payload_size = 0
         entropy = 0.0
-        try:
-            block = await asyncio.wait_for(reader.read(256), timeout=2.0)
-            if block:
-                banner = _format_probe_bytes(block)
-                payload_size = len(block)
-                entropy = _shannon_entropy(block)
-        except Exception:
-            pass
+        read_timeout = min(0.5, max(timeout, 0.05)) if banner_timeout is None else max(0.0, banner_timeout)
+        if read_timeout > 0:
+            try:
+                block = await asyncio.wait_for(reader.read(256), timeout=read_timeout)
+                if block:
+                    banner = _format_probe_bytes(block)
+                    payload_size = len(block)
+                    entropy = _shannon_entropy(block)
+            except Exception:
+                pass
             
         writer.close()
         try:
@@ -164,6 +195,20 @@ async def _async_connect_probe(host: str, port: int, timeout: float, ts_us: int)
         return PortResult(host, port, "filtered", "tcp", "TIMEOUT", rtt_us, 0, ts_us)
     except OSError as exc:
         rtt_us = (time.monotonic() - t0) * 1_000_000
+        if _is_local_socket_exhaustion(exc):
+            result = PortResult(
+                host,
+                port,
+                "filtered",
+                "tcp",
+                "TIMEOUT",
+                rtt_us,
+                0,
+                ts_us,
+                technology=f"socket-error={exc.__class__.__name__}:{exc.errno}",
+            )
+            _append_scan_note(result, LOCAL_SOCKET_EXHAUSTED_NOTE)
+            return result
         flag = "RST" if "refused" in str(exc).lower() else "TIMEOUT"
         state = "closed" if flag == "RST" else "filtered"
         return PortResult(host, port, state, "tcp", flag, rtt_us, 0, ts_us)
@@ -172,21 +217,25 @@ async def _async_connect_probe(host: str, port: int, timeout: float, ts_us: int)
         return PortResult(host, port, "filtered", "tcp", "TIMEOUT", rtt_us, 0, ts_us)
 
 
-def async_batch_connect_probe(host: str, ports: list[int], timeout: float = 1.0) -> list[PortResult]:
+def async_batch_connect_probe(
+    host: str,
+    ports: list[int],
+    timeout: float = 1.0,
+    max_concurrency: int | None = None,
+    banner_timeout: float | None = None,
+) -> list[PortResult]:
     import asyncio
     import time
     ts_us = int(time.time() * 1_000_000)
+    concurrency = max(1, min(len(ports), int(max_concurrency or len(ports)))) if ports else 1
     
     async def _run():
-        sem = asyncio.Semaphore(max(1, len(ports)))
+        sem = asyncio.Semaphore(concurrency)
         async def _bounded_probe(p: int):
             async with sem:
-                return await _async_connect_probe(host, p, timeout, ts_us)
+                return await _async_connect_probe(host, p, timeout, ts_us, banner_timeout=banner_timeout)
                 
-        tasks = []
-        for p in ports:
-            tasks.append(asyncio.create_task(_bounded_probe(p)))
-            await asyncio.sleep(0.001)
+        tasks = [asyncio.create_task(_bounded_probe(p)) for p in ports]
         return await asyncio.gather(*tasks)
         
     return asyncio.run(_run())

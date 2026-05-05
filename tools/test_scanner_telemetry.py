@@ -209,9 +209,9 @@ class ScannerTelemetryTests(unittest.TestCase):
         output = stream.getvalue()
         self.assertIn("OPEN host=10.0.0.1 port=443 proto=tcp", output)
         self.assertIn("ports=1/2", output)
-        self.assertIn("tx=", output)
-        self.assertIn("rx=", output)
-        self.assertIn("req/s=", output)
+        self.assertIn("est_tx=", output)
+        self.assertIn("est_rx=", output)
+        self.assertIn("ports/s=", output)
 
     def test_scan_dry_run_resolves_inputs_without_probe_engine(self) -> None:
         stream = io.StringIO()

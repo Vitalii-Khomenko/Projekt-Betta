@@ -16,6 +16,8 @@
 # =============================================================================
 from __future__ import annotations
 
+import asyncio
+import errno
 import sys
 import unittest
 from pathlib import Path
@@ -74,6 +76,32 @@ class RawProbeSafetyTests(unittest.TestCase):
         self.assertEqual(len(results), len(ports))
         self.assertTrue(all(result.protocol_flag == "RST" for result in results))
 
+    def test_connect_scan_stops_on_persistent_local_socket_exhaustion(self) -> None:
+        engine = scanner_engine.SpikeScanEngine(profile="x15", seed=7, speed_level=300)
+        ports = list(range(1, 33))
+
+        def fake_batch(host: str, batch_ports: list[int], timeout: float = 1.0, max_concurrency=None, banner_timeout=None) -> list[PortResult]:
+            return [
+                PortResult(
+                    host,
+                    port,
+                    "filtered",
+                    "tcp",
+                    "TIMEOUT",
+                    100.0,
+                    0,
+                    port,
+                    scan_note=scanner_probes.LOCAL_SOCKET_EXHAUSTED_NOTE,
+                )
+                for port in batch_ports
+            ]
+
+        with mock.patch.object(scanner_engine, "RAW_AVAILABLE", False):
+            with mock.patch.object(scanner_engine, "async_batch_connect_probe", side_effect=fake_batch):
+                with mock.patch.object(scanner_engine.SpikeScanEngine, "_lif_step", return_value=("PROBE_SYN", 1.0, True)):
+                    with self.assertRaisesRegex(RuntimeError, "local TCP connect resources exhausted"):
+                        engine.scan("10.10.10.5", ports, checkpoint_interval=0, quiet=True)
+
     def test_parse_ports_rejects_out_of_range_values(self) -> None:
         with self.assertRaises(ValueError):
             scanner_probes.parse_ports("0")
@@ -93,6 +121,40 @@ class RawProbeSafetyTests(unittest.TestCase):
     def test_parse_targets_rejects_large_cidr_before_expansion(self) -> None:
         with self.assertRaises(ValueError):
             scanner_probes.parse_targets("10.0.0.0/8")
+
+    def test_async_batch_connect_probe_limits_concurrency(self) -> None:
+        active = 0
+        max_active = 0
+
+        async def fake_probe(host: str, port: int, timeout: float, ts_us: int, banner_timeout=None) -> PortResult:
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0)
+            active -= 1
+            return PortResult(host, port, "closed", "tcp", "RST", 100.0, 0, ts_us)
+
+        with mock.patch.object(scanner_probes, "_async_connect_probe", side_effect=fake_probe):
+            results = scanner_probes.async_batch_connect_probe(
+                "127.0.0.1",
+                list(range(1, 21)),
+                timeout=0.01,
+                max_concurrency=3,
+            )
+
+        self.assertEqual(len(results), 20)
+        self.assertLessEqual(max_active, 3)
+
+    def test_async_connect_probe_marks_local_socket_exhaustion(self) -> None:
+        async def fake_open_connection(host: str, port: int):
+            raise OSError(errno.EADDRNOTAVAIL, "Cannot assign requested address")
+
+        with mock.patch("asyncio.open_connection", side_effect=fake_open_connection):
+            result = asyncio.run(scanner_probes._async_connect_probe("127.0.0.1", 22, 0.01, 1))
+
+        self.assertEqual(result.protocol_flag, "TIMEOUT")
+        self.assertIn(scanner_probes.LOCAL_SOCKET_EXHAUSTED_NOTE, result.scan_note)
+        self.assertIn("socket-error=OSError", result.technology)
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from training.tools.scanner_probes import async_batch_connect_probe, batch_syn_probe, connect_probe, syn_probe
+from training.tools.scanner_probes import LOCAL_SOCKET_EXHAUSTED_NOTE, async_batch_connect_probe, batch_syn_probe, connect_probe, syn_probe
 from training.tools.scanner_support import RAW_AVAILABLE, _print
 from training.tools.scanner_types import ACTIONS, FLAG_INDEX, INPUT_DIM, OUTPUT_DIM, PROFILES, PortResult, derive_runtime_profile
 from training.tools.scanner_utils import _normalize_result_text_fields, _recv_banner_chunks
@@ -41,6 +41,10 @@ RAW_GUARD_MIN_CONFIRMATIONS = 4
 RAW_TCP_MAX_PARALLEL = 512
 RAW_TCP_PARALLEL_MULTIPLIER = 8
 RAW_TCP_MIN_TIMEOUT = 1.0
+CONNECT_BATCH_MULTIPLIER = 8
+CONNECT_LOCAL_EXHAUSTION_RATIO = 0.25
+CONNECT_LOCAL_EXHAUSTION_MIN_COUNT = 16
+CONNECT_LOCAL_EXHAUSTION_BACKOFF_SECONDS = 2.0
 
 
 def _confirm_ports_with_connect(
@@ -65,6 +69,18 @@ def _confirm_ports_with_connect(
             confirmed.append(future.result())
     confirmed.sort(key=lambda result: result.port)
     return confirmed
+
+
+def _count_local_socket_exhaustion(results: list[PortResult]) -> int:
+    return sum(1 for result in results if LOCAL_SOCKET_EXHAUSTED_NOTE in result.scan_note)
+
+
+def _is_connect_batch_locally_exhausted(local_error_count: int, batch_result_count: int) -> bool:
+    if batch_result_count <= 0 or local_error_count <= 0:
+        return False
+    if local_error_count >= CONNECT_LOCAL_EXHAUSTION_MIN_COUNT:
+        return True
+    return (local_error_count / batch_result_count) >= CONNECT_LOCAL_EXHAUSTION_RATIO
 
 
 class SpikeScanEngine:
@@ -164,7 +180,8 @@ class SpikeScanEngine:
         port_index = 0
         forced_probes = 0
         wait_cycles = 0
-        batch_size = max(1, self.profile.max_parallel * 8)
+        connect_concurrency = max(1, self.profile.max_parallel)
+        batch_size = max(1, connect_concurrency * CONNECT_BATCH_MULTIPLIER)
         if probe_mode == "raw":
             batch_size = min(
                 RAW_TCP_MAX_PARALLEL,
@@ -173,6 +190,7 @@ class SpikeScanEngine:
         checkpoint_step = checkpoint_interval if checkpoint_interval > 0 else 0
         next_checkpoint = checkpoint_step if checkpoint_step and len(ports) > checkpoint_step else 0
         if probe_mode == "connect" and source_port is not None:
+            connect_concurrency = 1
             batch_size = 1
         deterministic_coverage = probe_mode == "connect"
         raw_guard_checked = False
@@ -279,7 +297,37 @@ class SpikeScanEngine:
                         for future in as_completed(futures):
                             batch_results.append(future.result())
                     else:
-                        batch_results = async_batch_connect_probe(host, batch_ports, timeout=self.profile.probe_timeout)
+                        batch_results = async_batch_connect_probe(
+                            host,
+                            batch_ports,
+                            timeout=self.profile.probe_timeout,
+                            max_concurrency=connect_concurrency,
+                            banner_timeout=min(0.5, max(self.profile.probe_timeout, 0.05)),
+                        )
+                        local_error_count = _count_local_socket_exhaustion(batch_results)
+                        if _is_connect_batch_locally_exhausted(local_error_count, len(batch_results)):
+                            connect_concurrency = max(1, connect_concurrency // 2)
+                            batch_size = max(1, connect_concurrency * CONNECT_BATCH_MULTIPLIER)
+                            if not quiet:
+                                _print(
+                                    "[yellow][Betta-Morpho] Local TCP connect resources are saturated.[/] "
+                                    + f"Backing off to concurrency={connect_concurrency} and retrying this batch."
+                                )
+                            time.sleep(CONNECT_LOCAL_EXHAUSTION_BACKOFF_SECONDS)
+                            batch_results = async_batch_connect_probe(
+                                host,
+                                batch_ports,
+                                timeout=max(self.profile.probe_timeout, 0.2),
+                                max_concurrency=connect_concurrency,
+                                banner_timeout=min(0.5, max(self.profile.probe_timeout, 0.05)),
+                            )
+                            retry_local_error_count = _count_local_socket_exhaustion(batch_results)
+                            if _is_connect_batch_locally_exhausted(retry_local_error_count, len(batch_results)):
+                                raise RuntimeError(
+                                    "local TCP connect resources exhausted; "
+                                    "the scan was stopped to avoid reporting unprobed ports as scanned. "
+                                    "Try a lower --speed-level, --profile normal, or raw SYN mode with privileges."
+                                )
                         
                 batch_results.sort(key=lambda result: result.port)
                 results.extend(batch_results)
