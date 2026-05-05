@@ -82,7 +82,7 @@ At the Python layer, scan behavior is driven by `SpikeScanEngine`.
 The engine currently provides:
 
 - profile-specific timing behavior
-- speed presets and manual `speed-level` override from `1..100`
+- speed presets and manual `speed-level` override from `1..300`
 - connect-mode and raw-mode execution paths
 - synthetic scanner training support
 - batch-oriented scanning with checkpoint callbacks

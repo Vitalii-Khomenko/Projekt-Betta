@@ -63,7 +63,7 @@ Useful flags:
 - `--ports-udp 53,123,161`
 - `--checkpoint-every 1000`
 - `--progress-log FILE`
-- `--speed-level 1..100`
+- `--speed-level 1..300`
 - `--service-artifact FILE`
 - `--service-catalog FILE`
 - `--active-learning-output FILE`

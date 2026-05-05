@@ -41,7 +41,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from training.tools.scanner_engine import SpikeScanEngine, train_scanner_snn
 from training.tools.scanner_enrichment import enrich_port_results, export_active_learning_rows
 from training.tools.scanner_probes import discover_hosts, parse_ports, parse_targets, retry_filtered_tcp_with_source_port, udp_connect_probe, udp_probe
-from training.tools.scanner_support import Panel, Prompt, RICH, SCAPY_AVAILABLE, Table, _C, _print, detect_service, load_service_artifact, RAW_AVAILABLE
+from training.tools.scanner_support import Panel, Prompt, RICH, SCAPY_AVAILABLE, _C, _print, detect_service, load_service_artifact, RAW_AVAILABLE
 from training.tools.scanner_types import MAX_MANUAL_SPEED_LEVEL, MIN_MANUAL_SPEED_LEVEL, PROFILES, PortResult
 from training.tools.scanner_utils import _normalize_result_text_fields, _shannon_entropy
 from tools.host_discovery import default_artifact_path, discover_from_port_results, export_discovery_csv, export_discovery_html
@@ -465,10 +465,12 @@ class ScanCheckpointWriter:
         progress_log: Path | None,
         checkpoint_every: int,
         total_ports: int,
+        quiet: bool = False,
     ) -> None:
         self.result_csv = result_csv
         self.html_path = html_path
         self.progress_log = progress_log
+        self.quiet = quiet
         self.checkpoint_every = max(0, checkpoint_every)
         self.total_ports = max(0, total_ports)
         self.enabled = bool(self.checkpoint_every and self.total_ports > self.checkpoint_every)
@@ -493,7 +495,8 @@ class ScanCheckpointWriter:
             f"{self.started_at.strftime('%Y-%m-%d %H:%M:%S')}  "
             f"target={target}  targets={target_count}  ports={self.total_ports}  profile={profile}"
         )
-        _print(message)
+        if not self.quiet:
+            _print(message)
         self._append_log(
             "SCAN_START",
             {
@@ -517,11 +520,12 @@ class ScanCheckpointWriter:
         elapsed = time.monotonic() - self._started_perf
         open_so_far = sum(1 for result in cumulative_results if result.protocol_flag == "SYN_ACK")
         self._checkpoint_count += 1
-        _print(
-            "[dim][Betta-Morpho] checkpoint[/] "
-            + f"{scanned_ports}/{self.total_ports} ports  elapsed={_format_elapsed(elapsed)}  "
-            + f"open={open_so_far}  host={host}"
-        )
+        if not self.quiet:
+            _print(
+                "[dim][Betta-Morpho] checkpoint[/] "
+                + f"{scanned_ports}/{self.total_ports} ports  elapsed={_format_elapsed(elapsed)}  "
+                + f"open={open_so_far}  host={host}"
+            )
         self._append_log(
             "CHECKPOINT",
             {
@@ -547,10 +551,11 @@ class ScanCheckpointWriter:
                 "result_rows": total_results,
             },
         )
-        _print(
-            f"[dim][Betta-Morpho] Scan elapsed:[/] {_format_elapsed(elapsed)}"
-            + (f"  checkpoints={self._checkpoint_count}" if self.enabled else "")
-        )
+        if not self.quiet:
+            _print(
+                f"[dim][Betta-Morpho] Scan elapsed:[/] {_format_elapsed(elapsed)}"
+                + (f"  checkpoints={self._checkpoint_count}" if self.enabled else "")
+            )
 
     def abort(self, total_results: int | None = None) -> None:
         elapsed = time.monotonic() - self._started_perf
@@ -581,60 +586,58 @@ class ScanCheckpointWriter:
             handle.write(f"{stamp} [{tag}] {payload}\n")
 
 
-def display_results(results: list[PortResult]) -> None:
+def _clean_result_text(value: str, limit: int) -> str:
+    return " ".join(value.split())[:limit]
+
+
+def _format_open_result_line(result: PortResult, minimal: bool = False) -> str:
+    fields = [
+        "OPEN",
+        f"host={result.host}",
+        f"port={result.port}",
+        f"proto={result.protocol.lower()}",
+    ]
+    if minimal:
+        if result.service_version or result.service:
+            fields.append(f"service={_clean_result_text(result.service_version or result.service, 80)!r}")
+        return " ".join(fields)
+
+    fields.extend(
+        [
+            "state=open",
+            f"flag={result.protocol_flag}",
+            f"rtt_us={result.rtt_us:.0f}",
+        ]
+    )
+    if result.os_hint:
+        fields.append(f"os={_clean_result_text(result.os_hint, 80)!r}")
+    if result.service_version or result.service:
+        fields.append(f"service={_clean_result_text(result.service_version or result.service, 120)!r}")
+    if result.technology:
+        fields.append(f"tech={_clean_result_text(result.technology, 120)!r}")
+    if result.response_entropy:
+        fields.append(f"entropy={result.response_entropy:.2f}")
+    if result.tcp_window:
+        fields.append(f"tcp_window={result.tcp_window}")
+    if result.scan_note:
+        fields.append(f"note={_clean_result_text(result.scan_note, 120)!r}")
+    if result.cve_hint:
+        fields.append(f"cve={_clean_result_text(result.cve_hint, 120)!r}")
+    if result.banner:
+        fields.append(f"banner={_clean_result_text(result.banner, 160)!r}")
+    return " ".join(fields)
+
+
+def display_results(results: list[PortResult], minimal: bool = False) -> None:
     open_results = [result for result in results if result.state == "open"]
     if not open_results:
-        _print("[yellow]No open ports found.[/]")
+        print("No open ports found.")
         return
 
-    if not RICH or Table is None or _C is None:
-        for result in open_results:
-            service_str = f"  service={result.service_version or result.service}" if (result.service_version or result.service) else ""
-            banner_str = f"  banner={result.banner[:40]!r}" if result.banner else ""
-            tech_str = f"  tech={result.technology[:50]!r}" if result.technology else ""
-            entropy_str = f"  entropy={result.response_entropy:.2f}" if result.response_entropy else ""
-            window_str = f"  window={result.tcp_window}" if result.tcp_window else ""
-            note_str = f"  note={result.scan_note[:60]!r}" if result.scan_note else ""
-            cve_str = f"  cve={result.cve_hint[:60]!r}" if result.cve_hint else ""
-            os_str = f"  os={result.os_hint}" if result.os_hint else ""
-            print(f"  OPEN {result.host}:{result.port}/{result.protocol}  {result.protocol_flag}  {result.rtt_us:.0f}us{os_str}{service_str}{tech_str}{entropy_str}{window_str}{note_str}{cve_str}{banner_str}")
-        print(f"  {len(open_results)} open / {len(results)} probed")
-        return
-
-    table = Table(title="Open Ports", header_style="bold cyan", show_lines=False)
-    table.add_column("Host")
-    table.add_column("Port", justify="right")
-    table.add_column("Proto")
-    table.add_column("State")
-    table.add_column("Flag")
-    table.add_column("RTT us", justify="right")
-    table.add_column("Service")
-    table.add_column("OS Hint")
-    table.add_column("Technology")
-    table.add_column("Entropy")
-    table.add_column("TCP Window")
-    table.add_column("Scan Note")
-    table.add_column("CVE Hint")
-    table.add_column("Banner")
     for result in sorted(open_results, key=lambda item: (item.host, item.port)):
-        table.add_row(
-            result.host,
-            str(result.port),
-            result.protocol.upper(),
-            "[green]open[/]",
-            result.protocol_flag,
-            f"{result.rtt_us:.0f}",
-            (result.service_version or result.service)[:32],
-            result.os_hint,
-            result.technology[:36] if result.technology else "",
-            f"{result.response_entropy:.2f}" if result.response_entropy else "",
-            str(result.tcp_window) if result.tcp_window else "",
-            result.scan_note[:36] if result.scan_note else "",
-            result.cve_hint[:36] if result.cve_hint else "",
-            result.banner[:60] if result.banner else "",
-        )
-    _C.print(table)
-    _C.print(f"Total: [bold green]{len(open_results)}[/] open / {len(results)} probed")
+        print(_format_open_result_line(result, minimal=minimal))
+    if not minimal:
+        print(f"Total: {len(open_results)} open / {len(results)} probed")
 
 
 def interactive_scanner() -> int:
@@ -663,7 +666,7 @@ def interactive_scanner() -> int:
     target_spec = ask("Target(s) [IP / CIDR / range 10.10.0.1-20 / comma list]")
     port_spec = ask("Ports [top100 / top20 / 22,80 / 1-1024]", "top100")
     profile_name = ask("Scan mode / speed [paranoid/sneaky/polite/normal/aggressive/x5/x10/x15]", "normal")
-    manual_speed_raw = ask("Manual speed level override 1-100 (blank = preset only)", "")
+    manual_speed_raw = ask(f"Manual speed level override {MIN_MANUAL_SPEED_LEVEL}-{MAX_MANUAL_SPEED_LEVEL} (blank = preset only)", "")
     speed_level = None
     if manual_speed_raw:
         speed_level = max(MIN_MANUAL_SPEED_LEVEL, min(MAX_MANUAL_SPEED_LEVEL, int(manual_speed_raw)))
@@ -848,6 +851,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan_cmd.add_argument("--html", metavar="PATH", help="Write a self-contained HTML report to PATH")
     scan_cmd.add_argument("--progress-log", metavar="PATH", help="Append scan start/checkpoint timing to PATH")
     scan_cmd.add_argument("--connect-only", action="store_true", help="Force TCP connect probes instead of raw packet probes")
+    scan_cmd.add_argument("--minimal-output", action="store_true", help="Print only open ports with minimal fields")
     scan_cmd.add_argument("--verify-with-nmap", action="store_true", help="Run targeted Nmap verification against Betta-Morpho-open ports after the scan")
     scan_cmd.add_argument("--no-classify", action="store_true", help="Skip auto-classification after the scan")
     scan_cmd.add_argument(
@@ -903,6 +907,7 @@ def main() -> int:
             print("ERROR: scapy not installed - pip install scapy")
             return 1
 
+        minimal_output = bool(getattr(args, "minimal_output", False))
         os.environ[SERVICE_CATALOG_ENV] = str(Path(args.service_catalog))
 
         artifact = Path(args.artifact) if args.artifact else None
@@ -935,8 +940,9 @@ def main() -> int:
             if getattr(args, "discover_hostnames", False):
                 args.host_discovery_output = str(output_paths["hostnames_csv"])
                 args.host_discovery_html = str(output_paths["hostnames_html"])
-            _print(f"[bold cyan][Betta-Morpho] Output dir:[/] {report_dir}")
-        elif not args.output:
+            if not minimal_output:
+                _print(f"[bold cyan][Betta-Morpho] Output dir:[/] {report_dir}")
+        elif not args.output and not minimal_output:
             output_paths = build_scan_output_paths(PROJECT_ROOT / "data" / "scans", args.target)
             report_dir = Path(output_paths["dir"])
             report_dir.mkdir(parents=True, exist_ok=True)
@@ -951,7 +957,7 @@ def main() -> int:
                 args.host_discovery_output = str(output_paths["hostnames_csv"])
                 args.host_discovery_html = str(output_paths["hostnames_html"])
             _print(f"[bold cyan][Betta-Morpho] Output dir:[/] {report_dir}")
-        elif not getattr(args, "progress_log", None):
+        elif args.output and not getattr(args, "progress_log", None) and not minimal_output:
             args.progress_log = str(_session_output_path(args.output, "progress", ".log"))
         if getattr(args, "discover_hostnames", False):
             if not getattr(args, "host_discovery_output", None):
@@ -993,18 +999,20 @@ def main() -> int:
         if args.retry_source_port is not None:
             stealth_info.append(f"retry-sp={args.retry_source_port}")
 
-        _print(
-            f"[bold]SNN scanner[/]  targets={len(targets)}  ports={len(ports)}  profile={args.profile}"
-            + (f"  speed-level={args.speed_level}" if getattr(args, "speed_level", None) is not None else "")
-            + f"  beta={engine.profile.beta}"
-            + (f"  [{', '.join(stealth_info)}]" if stealth_info else "")
-        )
+        if not minimal_output:
+            _print(
+                f"[bold]SNN scanner[/]  targets={len(targets)}  ports={len(ports)}  profile={args.profile}"
+                + (f"  speed-level={args.speed_level}" if getattr(args, "speed_level", None) is not None else "")
+                + f"  beta={engine.profile.beta}"
+                + (f"  [{', '.join(stealth_info)}]" if stealth_info else "")
+            )
         progress_writer = ScanCheckpointWriter(
             result_csv=Path(args.output) if args.output else None,
             html_path=Path(args.html) if getattr(args, "html", None) else None,
             progress_log=Path(args.progress_log) if getattr(args, "progress_log", None) else None,
             checkpoint_every=int(getattr(args, "checkpoint_every", 1000)),
             total_ports=len(ports),
+            quiet=minimal_output,
         )
         all_results: list[PortResult] = []
         try:
@@ -1020,8 +1028,9 @@ def main() -> int:
             total_hosts = len(targets)
             for index, host in enumerate(targets, start=1):
                 if total_hosts > 1:
-                    _print(f"\n[bold cyan][Betta-Morpho] scanning[/] {host} ({index}/{total_hosts})")
-                else:
+                    if not minimal_output:
+                        _print(f"\n[bold cyan][Betta-Morpho] scanning[/] {host} ({index}/{total_hosts})")
+                elif not minimal_output:
                     _print(f"\n[bold cyan]SNN scanning[/] {host} ...")
 
                 def _checkpoint(scanned_ports: int, total_ports: int, partial_results: list[PortResult]) -> None:
@@ -1039,9 +1048,11 @@ def main() -> int:
                     source_port=args.source_port,
                     checkpoint_interval=int(getattr(args, "checkpoint_every", 1000)),
                     progress_callback=_checkpoint,
+                    quiet=minimal_output,
                 )
                 if udp_ports:
-                    _print(f"[dim]  UDP pass: {len(udp_ports)} ports ...[/]")
+                    if not minimal_output:
+                        _print(f"[dim]  UDP pass: {len(udp_ports)} ports ...[/]")
                     
                     def _do_udp(p: int):
                         if RAW_AVAILABLE and not args.connect_only:
@@ -1053,25 +1064,27 @@ def main() -> int:
                         for future in as_completed(futures):
                             host_results.append(future.result())
                 if args.retry_source_port is not None:
-                    _print(f"[dim]  Source-port retry: filtered TCP ports via {args.retry_source_port} ...[/]")
+                    if not minimal_output:
+                        _print(f"[dim]  Source-port retry: filtered TCP ports via {args.retry_source_port} ...[/]")
                     retried_count, changed_count = retry_filtered_tcp_with_source_port(
                         host,
                         host_results,
                         timeout=engine.profile.probe_timeout,
                         source_port=args.retry_source_port,
                     )
-                    _print(f"[dim]    retried={retried_count} changed={changed_count}[/]")
+                    if not minimal_output:
+                        _print(f"[dim]    retried={retried_count} changed={changed_count}[/]")
 
                 enrich_port_results(host_results, service_artifact=service_artifact)
                 all_results.extend(host_results)
-                display_results(host_results)
+                display_results(host_results, minimal=minimal_output)
                 if args.jitter_ms and index < total_hosts:
                     time.sleep(random.uniform(0, args.jitter_ms / 1000.0))
 
             if args.output:
-                export_csv(all_results, Path(args.output))
+                export_csv(all_results, Path(args.output), announce=not minimal_output)
                 json_path = Path(args.output).with_suffix(".json")
-                export_json(all_results, json_path)
+                export_json(all_results, json_path, announce=not minimal_output)
 
             if service_artifact and getattr(args, "active_learning_output", None):
                 try:
@@ -1109,7 +1122,7 @@ def main() -> int:
                     _print("[yellow][Betta-Morpho] Nmap verification skipped: requires --output or --report.[/]")
 
             if getattr(args, "html", None):
-                export_html(all_results, Path(args.html), verification_summary=verification_summary)
+                export_html(all_results, Path(args.html), verification_summary=verification_summary, announce=not minimal_output)
 
             if getattr(args, "save_weights", None):
                 engine.save_artifact(Path(args.save_weights))
@@ -1197,7 +1210,8 @@ def main() -> int:
                     args.profile,
                     all_results,
                 )
-                _print(f"[dim]Saved to scan history (scan #{scan_id})[/]")
+                if not minimal_output:
+                    _print(f"[dim]Saved to scan history (scan #{scan_id})[/]")
             except (ImportError, OSError, sqlite3.Error, ValueError) as exc:
                 _print(f"[yellow][Betta-Morpho] Scan history skipped: {exc}[/]")
 

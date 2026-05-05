@@ -39,11 +39,23 @@ class LauncherSmokeTests(unittest.TestCase):
         discover_args = parser.parse_args(
             ["discover-hostnames", "data/scans/example_result.csv", "--output", "data/scans/example_hostnames.csv"]
         )
-        scan_args = parser.parse_args(["scan", "--target", "127.0.0.1", "--discover-hostnames"])
+        scan_args = parser.parse_args(["scan", "--target", "127.0.0.1", "--discover-hostnames", "--minimal-output"])
 
         self.assertEqual(discover_args.inputs, ["data/scans/example_result.csv"])
         self.assertEqual(discover_args.output, "data/scans/example_hostnames.csv")
         self.assertTrue(scan_args.discover_hostnames)
+        self.assertTrue(scan_args.minimal_output)
+
+    def test_fast_start_scan_args_are_full_tcp_aggressive_minimal(self) -> None:
+        args = launcher._build_fast_start_scan_args("10.10.10.5")
+
+        self.assertEqual(args[0:3], ["scan", "--target", "10.10.10.5"])
+        self.assertIn("--ports", args)
+        self.assertEqual(args[args.index("--ports") + 1], "1-65535")
+        self.assertEqual(args[args.index("--profile") + 1], "aggressive")
+        self.assertEqual(args[args.index("--speed-level") + 1], "300")
+        self.assertIn("--no-discovery", args)
+        self.assertIn("--minimal-output", args)
 
 
 if __name__ == "__main__":

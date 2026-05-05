@@ -30,7 +30,8 @@ PROFILES: dict[str, SNNProfile] = {
 }
 
 MIN_MANUAL_SPEED_LEVEL = 1
-MAX_MANUAL_SPEED_LEVEL = 100
+LEGACY_MAX_MANUAL_SPEED_LEVEL = 100
+MAX_MANUAL_SPEED_LEVEL = 300
 
 
 def clamp_speed_level(level: int) -> int:
@@ -41,7 +42,8 @@ def derive_runtime_profile(base_profile: SNNProfile, speed_level: int | None = N
     """Return the runtime profile, optionally overriding pacing with a manual speed level.
 
     The manual speed level preserves the base profile's neural character while replacing
-    transport pacing parameters with a smooth 1-100 throughput scale:
+    transport pacing parameters with a smooth 1-300 throughput scale. Levels 1-100
+    keep the original pacing curve; levels 101-300 unlock a higher-throughput range:
     - lower levels -> longer waits, higher timeouts, low parallelism
     - higher levels -> shorter waits, shorter timeouts, high parallelism
     """
@@ -50,18 +52,26 @@ def derive_runtime_profile(base_profile: SNNProfile, speed_level: int | None = N
         return base_profile
 
     level = clamp_speed_level(speed_level)
-    norm = (level - MIN_MANUAL_SPEED_LEVEL) / (MAX_MANUAL_SPEED_LEVEL - MIN_MANUAL_SPEED_LEVEL)
-
-    min_wait_ms = 0.25
-    max_wait_ms = 5000.0
-    min_timeout = 0.20
-    max_timeout = 5.0
     min_parallel = 1
-    max_parallel = 64
+    legacy_max_parallel = 64
 
-    wait_ms = math.exp(math.log(max_wait_ms) + (math.log(min_wait_ms) - math.log(max_wait_ms)) * norm)
-    probe_timeout = math.exp(math.log(max_timeout) + (math.log(min_timeout) - math.log(max_timeout)) * norm)
-    parallel = int(round(min_parallel + (max_parallel - min_parallel) * norm))
+    if level <= LEGACY_MAX_MANUAL_SPEED_LEVEL:
+        norm = (level - MIN_MANUAL_SPEED_LEVEL) / (LEGACY_MAX_MANUAL_SPEED_LEVEL - MIN_MANUAL_SPEED_LEVEL)
+        min_wait_ms = 0.25
+        max_wait_ms = 5000.0
+        min_timeout = 0.20
+        max_timeout = 5.0
+
+        wait_ms = math.exp(math.log(max_wait_ms) + (math.log(min_wait_ms) - math.log(max_wait_ms)) * norm)
+        probe_timeout = math.exp(math.log(max_timeout) + (math.log(min_timeout) - math.log(max_timeout)) * norm)
+        parallel = int(round(min_parallel + (legacy_max_parallel - min_parallel) * norm))
+    else:
+        turbo_norm = (level - LEGACY_MAX_MANUAL_SPEED_LEVEL) / (MAX_MANUAL_SPEED_LEVEL - LEGACY_MAX_MANUAL_SPEED_LEVEL)
+        max_parallel = 192
+
+        wait_ms = math.exp(math.log(0.25) + (math.log(0.05) - math.log(0.25)) * turbo_norm)
+        probe_timeout = math.exp(math.log(0.20) + (math.log(0.08) - math.log(0.20)) * turbo_norm)
+        parallel = int(round(legacy_max_parallel + (max_parallel - legacy_max_parallel) * turbo_norm))
 
     return SNNProfile(
         name=f"{base_profile.name}@manual-{level}",
@@ -71,7 +81,7 @@ def derive_runtime_profile(base_profile: SNNProfile, speed_level: int | None = N
         wait_ms=wait_ms,
         probe_timeout=probe_timeout,
         ttl=base_profile.ttl,
-        max_parallel=max(min_parallel, min(max_parallel, parallel)),
+        max_parallel=max(min_parallel, min(192, parallel)),
     )
 
 INPUT_DIM = 10

@@ -147,12 +147,13 @@ class SpikeScanEngine:
         checkpoint_interval: int = 1000,
         progress_callback: Optional[Callable[[int, int, list[PortResult]], None]] = None,
         _raw_guard_enabled: bool = True,
+        quiet: bool = False,
     ) -> list[PortResult]:
         probe_mode = "connect" if force_connect else ("raw" if RAW_AVAILABLE else "connect")
         raw_profile = replace(self.profile, probe_timeout=max(self.profile.probe_timeout, RAW_TCP_MIN_TIMEOUT))
-        if probe_mode == "connect":
+        if not quiet and probe_mode == "connect":
             _print("[yellow]No raw socket access (Npcap not installed or no admin).[/] Using TCP connect fallback; SNN logic unchanged.")
-        else:
+        elif not quiet:
             _print("[bold green][Betta-Morpho] Raw SYN mode active.[/] Using raw socket probes.")
 
         self.reset()
@@ -312,11 +313,12 @@ class SpikeScanEngine:
                         )
                         confirmed_count = sum(1 for result in confirmed_sample if result.protocol_flag == "SYN_ACK")
                         if confirmed_count < RAW_GUARD_MIN_CONFIRMATIONS:
-                            _print(
-                                "[yellow][Betta-Morpho] Raw SYN validation failed:[/] "
-                                + f"{confirmed_count}/{len(sample_ports)} sample ports confirmed. "
-                                + "Switching this host to TCP connect fallback."
-                            )
+                            if not quiet:
+                                _print(
+                                    "[yellow][Betta-Morpho] Raw SYN validation failed:[/] "
+                                    + f"{confirmed_count}/{len(sample_ports)} sample ports confirmed. "
+                                    + "Switching this host to TCP connect fallback."
+                                )
                             results = _confirm_ports_with_connect(
                                 host,
                                 ports[:port_index],
@@ -344,14 +346,14 @@ class SpikeScanEngine:
                         progress_callback(next_checkpoint, len(ports), list(results[:next_checkpoint]))
                     next_checkpoint += checkpoint_step
 
-                if progress_callback is None and port_index % 1000 == 0 and port_index > 0:
+                if not quiet and progress_callback is None and port_index % 1000 == 0 and port_index > 0:
                     open_so_far = sum(1 for result in results if result.protocol_flag == "SYN_ACK")
                     _print(f"[dim]  {port_index}/{len(ports)} ports scanned, {open_so_far} open[/]")
         finally:
             if pool is not None:
                 pool.shutdown(wait=True)
 
-        if forced_probes:
+        if not quiet and forced_probes:
             _print(f"[dim]Coverage guard forced {forced_probes} probe decisions in connect mode.[/]")
 
         open_results = [result for result in results if result.protocol_flag == "SYN_ACK" and not result.banner]
@@ -547,4 +549,3 @@ def train_scanner_snn(
             _print(f"  epoch {epoch:3d}/{epochs}  acc={accuracy:.3f}  best={best_accuracy:.3f}")
 
     return best_accuracy
-

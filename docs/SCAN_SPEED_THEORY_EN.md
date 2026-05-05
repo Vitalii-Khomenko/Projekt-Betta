@@ -114,13 +114,14 @@ Higher speed means:
 
 That improves throughput, but only until the result quality starts degrading.
 
-## Manual Speed Level 1-100
+## Manual Speed Level 1-300
 
 Betta-Morpho also supports a manual speed override:
 
 - `1` = minimum pressure
 - `50` = balanced manual pacing
-- `100` = maximum manual throughput
+- `100` = original maximum manual throughput
+- `300` = turbo manual throughput for controlled local and lab scans
 
 This manual level keeps the chosen profile's neural behavior, but overrides runtime pacing:
 

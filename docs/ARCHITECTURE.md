@@ -143,7 +143,7 @@ Profile families:
 - stealth-oriented: `paranoid`, `sneaky`, `polite`
 - general use: `normal`
 - high-speed: `aggressive`, `x5`, `x10`, `x15`
-- manual override: `--speed-level 1..100`
+- manual override: `--speed-level 1..300`
 
 ## Registry And Benchmark Layer
 

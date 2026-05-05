@@ -38,6 +38,8 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from training.tools.scanner_types import MAX_MANUAL_SPEED_LEVEL, MIN_MANUAL_SPEED_LEVEL
+
 try:
     from rich.console import Console
     from rich.panel import Panel
@@ -141,15 +143,16 @@ SCAN_MODE_INFO = [
 MANUAL_SCAN_MODE_OPTION = (
     "9",
     "manual-speed",
-    "Manual speed 1-100",
+    f"Manual speed {MIN_MANUAL_SPEED_LEVEL}-{MAX_MANUAL_SPEED_LEVEL}",
     "Choose a base profile and then tune throughput yourself. Best when you want exact runtime pressure instead of a preset.",
 )
 
 MANUAL_SPEED_INFO = (
-    "Manual speed level is a throughput override from 1 to 100.\n"
+    f"Manual speed level is a throughput override from {MIN_MANUAL_SPEED_LEVEL} to {MAX_MANUAL_SPEED_LEVEL}.\n"
     "- 1 = minimal pressure, long waits, low parallelism\n"
     "- 50 = balanced manual pacing\n"
-    "- 100 = maximum manual throughput for stress testing and fast lab scans\n\n"
+    "- 100 = original maximum manual throughput for stress testing and fast lab scans\n"
+    "- 300 = turbo manual throughput for controlled local and lab scans\n\n"
     "It keeps the selected profile's neural behavior, but overrides runtime pacing,\n"
     "timeouts, and parallelism."
 )
@@ -242,7 +245,7 @@ PROJECT_LEARNING_TOPICS = {
         "Speed-oriented modes:\n"
         "- x5, x10, x15\n\n"
         "Manual speed override:\n"
-        "- 1 to 100 as a runtime throughput scale layered on top of the chosen profile\n\n"
+        f"- {MIN_MANUAL_SPEED_LEVEL} to {MAX_MANUAL_SPEED_LEVEL} as a runtime throughput scale layered on top of the chosen profile\n\n"
         "Use x15 or a high manual speed mostly for localhost, lab, LAN, or other stable environments where speed matters most.",
     ),
     "4": (
@@ -408,7 +411,10 @@ def _choose_scan_runtime(default_key: str = "4") -> tuple[str, int | None]:
     if choice == MANUAL_SCAN_MODE_OPTION[0]:
         _print_panel("Manual Speed", MANUAL_SPEED_INFO)
         profile = _choose_scan_profile("4")
-        speed_level = max(1, min(100, prompt_int("Manual speed level", 50)))
+        speed_level = max(
+            MIN_MANUAL_SPEED_LEVEL,
+            min(MAX_MANUAL_SPEED_LEVEL, prompt_int("Manual speed level", 50)),
+        )
         return profile, speed_level
     profile = next(mode for key, mode, _, _ in SCAN_MODE_INFO if key == choice)
     return profile, None
@@ -445,7 +451,7 @@ def _show_scan_mode_guide() -> None:
     _print_panel(
         "Scan Modes / Speed Presets",
         "\n".join(f"- {mode}: {meaning}. {description}" for _, mode, meaning, description in SCAN_MODE_INFO)
-        + "\n- manual-speed: choose menu item 9 to enter your own speed level from 1 to 100.",
+        + f"\n- manual-speed: choose menu item 9 to enter your own speed level from {MIN_MANUAL_SPEED_LEVEL} to {MAX_MANUAL_SPEED_LEVEL}.",
     )
 
 
@@ -513,7 +519,7 @@ def _build_scan_args_interactive() -> list[str]:
     _show_question_hint(
         "Speed Choice",
         "Preset speeds are easiest for most work.\n"
-        "Use option 9 if you want exact manual throughput tuning from 1 to 100.\n"
+        f"Use option 9 if you want exact manual throughput tuning from {MIN_MANUAL_SPEED_LEVEL} to {MAX_MANUAL_SPEED_LEVEL}.\n"
         "On Windows, connect mode with x10/x15 or a high manual speed is often the fastest practical option.",
     )
     profile, speed_level = _choose_scan_runtime("4")
@@ -681,6 +687,19 @@ def _build_scan_args_interactive() -> list[str]:
     return args
 
 
+def _build_fast_start_scan_args(target: str) -> list[str]:
+    return [
+        "scan",
+        "--target", target,
+        "--ports", "1-65535",
+        "--profile", "aggressive",
+        "--speed-level", str(MAX_MANUAL_SPEED_LEVEL),
+        "--checkpoint-every", "0",
+        "--no-discovery",
+        "--minimal-output",
+    ]
+
+
 def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
     scan_args: list[str] = [
         "scan",
@@ -701,6 +720,8 @@ def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
         scan_args.extend(["--service-catalog", args.service_catalog])
     if getattr(args, "transport", "auto") == "connect":
         scan_args.append("--connect-only")
+    if getattr(args, "minimal_output", False):
+        scan_args.append("--minimal-output")
     if getattr(args, "decoys", False):
         scan_args.append("--decoys")
     if getattr(args, "no_discovery", False):
@@ -1050,19 +1071,21 @@ def _scanner_launch_menu() -> int:
             "This branch is for real scanning work. It now separates transport, protocol, report, and verification decisions\n"
             "so the command you run matches the behavior you actually want.\n\n"
             "Practical rule:\n"
-            "- start with Guided scan launch\n"
+            "- use Fast Start when you only want an IP-to-open-ports scan\n"
+            "- use Guided scan launch when you want reports, UDP, verification, or custom transport\n"
             "- use Verify previous scan only when you already have a result CSV\n"
             "- lab tools are best for safe local validation",
         )
         choice = _prompt_menu_choice(
             "Scanner Launch Menu",
             [
-                ("1", "Guided scan launch", "Build a scan command with TCP, UDP, transport, report, and verification choices"),
-                ("2", "Verify previous scan with Nmap", "Run Nmap only against Betta-Morpho-open ports from a saved CSV"),
-                ("3", "Passive hostname discovery from saved scan", "Extract and rank hostnames/domains from existing scan results"),
-                ("4", "Run lab services", "Start local lab listeners for scanner practice"),
-                ("5", "Exercise lab traffic", "Generate controlled traffic against local lab services"),
-                ("6", "Scan ports from file (1000 ports)", "Shortcut to scan using the predefined Ports/1000.txt list"),
+                ("1", "Fast Start", "Only ask for IP, then scan full TCP 1-65535 with aggressive speed 300 and open-port output"),
+                ("2", "Guided scan launch", "Build a scan command with TCP, UDP, transport, report, and verification choices"),
+                ("3", "Verify previous scan with Nmap", "Run Nmap only against Betta-Morpho-open ports from a saved CSV"),
+                ("4", "Passive hostname discovery from saved scan", "Extract and rank hostnames/domains from existing scan results"),
+                ("5", "Run lab services", "Start local lab listeners for scanner practice"),
+                ("6", "Exercise lab traffic", "Generate controlled traffic against local lab services"),
+                ("7", "Scan ports from file (1000 ports)", "Shortcut to scan using the predefined Ports/1000.txt list"),
                 ("0", "Back", "Return to the main launcher"),
             ],
             "1",
@@ -1070,10 +1093,13 @@ def _scanner_launch_menu() -> int:
         if choice == "0":
             return 0
         if choice == "1":
+            target = prompt_text("Target IP", "127.0.0.1")
+            return run_script("training/tools/scanner.py", _build_fast_start_scan_args(target))
+        if choice == "2":
             if prompt_bool("Run the guided scan now->", True):
                 return _run_steps([("Run Betta-Morpho scan", "training/tools/scanner.py", _build_scan_args_interactive())])
             return 0
-        if choice == "2":
+        if choice == "3":
             _print_panel(
                 "Verify Previous Scan With Nmap",
                 "This runs Nmap only against ports Betta-Morpho found open.\n"
@@ -1088,7 +1114,7 @@ def _scanner_launch_menu() -> int:
             if nmap_extra:
                 verify_args.extend(["--nmap-extra", nmap_extra])
             return run_script("tools/verify_scan.py", verify_args)
-        if choice == "6":
+        if choice == "7":
             _print_panel(
                 "Scan Ports From File",
                 "This shortcut uses Ports/1000.txt which contains structured TCP and UDP port lists.\n"
@@ -1114,7 +1140,7 @@ def _scanner_launch_menu() -> int:
             if prompt_bool(f"Run scan against {target} with 1000 ports file now->", True):
                 return run_script("training/tools/scanner.py", scan_args)
             return 0
-        if choice == "3":
+        if choice == "4":
             arguments = [
                 "discover",
                 prompt_text("Input result CSV or directory", "data/scans"),
@@ -1129,9 +1155,9 @@ def _scanner_launch_menu() -> int:
             if prompt_bool("Also write HTML report->", True):
                 arguments.extend(["--html", prompt_text("Hostname HTML report", "data/scans/manual_hostnames_report.html")])
             return run_script("tools/host_discovery.py", arguments)
-        if choice == "4":
-            return run_script(LAB_SERVICES_SCRIPT, ["--host", prompt_text("Host", "127.0.0.1")])
         if choice == "5":
+            return run_script(LAB_SERVICES_SCRIPT, ["--host", prompt_text("Host", "127.0.0.1")])
+        if choice == "6":
             return run_script(
                 LAB_EXERCISE_SCRIPT,
                 [
@@ -1145,7 +1171,8 @@ def interactive_menu() -> int:
     while True:
         _print_panel(
             "Betta-Morpho Guided Launcher",
-            "Three clean branches:\n"
+            "Fast path plus three guided branches:\n"
+            "4. Fast Start scan\n"
             "1. Project learning and explanations\n"
             "2. Model training\n"
             "3. Scanner launch\n\n"
@@ -1155,6 +1182,7 @@ def interactive_menu() -> int:
         selection = _prompt_menu_choice(
             "Main Workflow Menu",
             [
+                ("4", "Fast Start", "Only ask for IP, then scan full TCP 1-65535 with aggressive speed 300 and open-port output"),
                 ("1", "Project learning", "Overview of workflow, artifacts, reports, transport, UDP, and verification"),
                 ("2", "Model training", "Train classifier, scanner, service model, host discovery model, or prepare datasets"),
                 ("3", "Scanner launch", "Run guided scans, verify past scans, discover hostnames, or use lab helpers"),
@@ -1173,6 +1201,9 @@ def interactive_menu() -> int:
         if selection == "3":
             _scanner_launch_menu()
             continue
+        if selection == "4":
+            target = prompt_text("Target IP", "127.0.0.1")
+            return run_script("training/tools/scanner.py", _build_fast_start_scan_args(target))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1302,9 +1333,11 @@ def build_parser() -> argparse.ArgumentParser:
                       choices=["paranoid", "sneaky", "polite", "normal", "aggressive", "x5", "x10", "x15"],
                       help="Scan mode / speed preset")
     scan.add_argument("--speed-level", type=int, default=None,
-                      help="Manual speed override from 1 to 100")
+                      help=f"Manual speed override from {MIN_MANUAL_SPEED_LEVEL} to {MAX_MANUAL_SPEED_LEVEL}")
     scan.add_argument("--transport", default="auto", choices=["auto", "connect"],
                       help="Transport behavior: auto/raw-capable or connect-only")
+    scan.add_argument("--minimal-output", action="store_true",
+                      help="Print only open ports with minimal fields")
     scan.add_argument("--artifact", default=None,
                       help="Trained scanner artifact JSON")
     scan.add_argument("--service-artifact", default=None,
