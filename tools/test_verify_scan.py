@@ -46,7 +46,18 @@ class VerifyScanTests(unittest.TestCase):
             )
             command = run_mock.call_args.args[0]
             self.assertIn(str(output_dir / "20260404_132857_127.0.0.1_nmap_verify"), command)
+            self.assertEqual(command[0:3], ["nmap", "-p", "22,80"])
             self.assertEqual(run_mock.call_args.kwargs["timeout"], 123)
+
+    def test_run_nmap_fast_start_preset_uses_requested_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "verify"
+
+            with patch("tools.verify_scan.shutil.which", return_value="/usr/bin/nmap"), patch("tools.verify_scan.subprocess.run") as run_mock:
+                run_nmap("nmap", "127.0.0.1", [22, 80], output_dir, "fast", nmap_preset="fast-start")
+
+            command = run_mock.call_args.args[0]
+            self.assertEqual(command[0:6], ["nmap", "-p", "22,80", "-sC", "-sV", "-Pn"])
 
     def test_parse_nmap_xml_extracts_verified_os_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

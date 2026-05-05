@@ -76,6 +76,8 @@ class LauncherSmokeTests(unittest.TestCase):
         self.assertIn("--no-discovery", args)
         self.assertIn("--minimal-output", args)
         self.assertIn("--fast-start-stats", args)
+        self.assertIn("--verify-with-nmap", args)
+        self.assertEqual(args[args.index("--nmap-preset") + 1], "fast-start")
 
 
 if __name__ == "__main__":

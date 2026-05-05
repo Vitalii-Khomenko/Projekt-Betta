@@ -706,6 +706,8 @@ def _build_fast_start_scan_args(target: str) -> list[str]:
         "--no-discovery",
         "--minimal-output",
         "--fast-start-stats",
+        "--verify-with-nmap",
+        "--nmap-preset", "fast-start",
     ]
 
 

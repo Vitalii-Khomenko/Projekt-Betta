@@ -54,6 +54,12 @@ def _clean_training_text(value: str) -> str:
 # ---------------------------------------------------------------------------
 NMAP_PRESETS: list[tuple[str, str, str, list[str]]] = [
     (
+        "0",
+        "fast-start",
+        "Fast Start verification  (-sC -sV -Pn)",
+        ["-sC", "-sV", "-Pn"],
+    ),
+    (
         "1",
         "deep",
         "Deep recon  (-sV -sC -T5 -Pn -vv)",
@@ -175,14 +181,14 @@ def run_nmap(
     flags = resolve_nmap_flags(nmap_preset, nmap_extra)
     command = [
         nmap_bin,
-        *flags,
         "-p",
         ",".join(str(port) for port in ports),
+        *flags,
         target,
         "-oA",
         str(base),
     ]
-    print(f"[nmap] running: {' '.join(command)}")
+    print(f"[nmap] running: {' '.join(command)}", flush=True)
     subprocess.run(command, check=True, timeout=timeout_seconds)
     return base.parent / f"{base.name}.xml"
 

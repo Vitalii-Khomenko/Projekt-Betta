@@ -32,6 +32,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 
@@ -720,7 +721,7 @@ def display_results(results: list[PortResult], minimal: bool = False) -> None:
         print(f"Total: {len(open_results)} open / {len(results)} probed")
 
 
-def _preview_values(values: list[object], limit: int = 12) -> str:
+def _preview_values(values: Sequence[object], limit: int = 12) -> str:
     if not values:
         return "-"
     shown = ", ".join(str(value) for value in values[:limit])
@@ -1078,6 +1079,13 @@ def main() -> int:
                 args.host_discovery_output = str(_session_output_path(args.output, "hostnames", ".csv"))
             if not getattr(args, "host_discovery_html", None):
                 args.host_discovery_html = str(_session_output_path(args.output, "hostnames_report", ".html"))
+        if fast_start_stats and getattr(args, "verify_with_nmap", False) and not args.output and not dry_run:
+            output_paths = build_scan_output_paths(PROJECT_ROOT / "data" / "scans", args.target)
+            report_dir = Path(output_paths["dir"])
+            report_dir.mkdir(parents=True, exist_ok=True)
+            args.output = str(output_paths["result_csv"])
+            if not minimal_output:
+                _print(f"[bold cyan][Betta-Morpho] Output dir:[/] {report_dir}")
 
         try:
             targets = parse_targets(args.target, max_targets=int(getattr(args, "max_targets", MAX_TARGETS)))
@@ -1244,20 +1252,30 @@ def main() -> int:
                         else:
                             from tools.verify_scan import verify_betta_morpho_csv
 
-                            verification_summary = verify_betta_morpho_csv(
-                                scan_csv=Path(args.output),
-                                target=targets[0] if targets else args.target,
-                                service_catalog=args.service_catalog,
-                                nmap_preset=getattr(args, "nmap_preset", "deep"),
-                                nmap_extra=getattr(args, "nmap_extra", ""),
-                                nmap_timeout=int(getattr(args, "nmap_timeout", 900)),
+                            open_tcp_ports = sorted(
+                                {
+                                    result.port
+                                    for result in all_results
+                                    if result.protocol == "tcp" and result.protocol_flag == "SYN_ACK"
+                                }
                             )
-                            _print(
-                                "[bold green][Betta-Morpho] Nmap verify:[/] "
-                                + f"matched={len(verification_summary.get('matched_ports', []))} "
-                                + f"betta_only={len(verification_summary.get('betta_morpho_only_ports', []))} "
-                                + f"nmap_only={len(verification_summary.get('nmap_only_ports', []))}"
-                            )
+                            if not open_tcp_ports:
+                                _print("[yellow][Betta-Morpho] Nmap verification skipped: no open TCP ports found.[/]")
+                            else:
+                                verification_summary = verify_betta_morpho_csv(
+                                    scan_csv=Path(args.output),
+                                    target=targets[0] if targets else args.target,
+                                    service_catalog=args.service_catalog,
+                                    nmap_preset=getattr(args, "nmap_preset", "deep"),
+                                    nmap_extra=getattr(args, "nmap_extra", ""),
+                                    nmap_timeout=int(getattr(args, "nmap_timeout", 900)),
+                                )
+                                _print(
+                                    "[bold green][Betta-Morpho] Nmap verify:[/] "
+                                    + f"matched={len(verification_summary.get('matched_ports', []))} "
+                                    + f"betta_only={len(verification_summary.get('betta_morpho_only_ports', []))} "
+                                    + f"nmap_only={len(verification_summary.get('nmap_only_ports', []))}"
+                                )
                     except subprocess.TimeoutExpired as exc:
                         verification_summary = _verification_failure_summary("timeout", exc, all_results)
                         _print(f"[yellow][Betta-Morpho] Nmap verification timed out: {exc}[/]")
