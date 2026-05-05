@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from training.tools.scanner_enrichment import export_active_learning_rows
-from training.tools.scanner import display_results, export_html
+from training.tools.scanner import FastStartStats, display_results, export_html
 from training.tools.scanner_types import (
     MAX_MANUAL_SPEED_LEVEL,
     PROFILES,
@@ -184,6 +184,33 @@ class ScannerTelemetryTests(unittest.TestCase):
 
         output = stream.getvalue().strip()
         self.assertEqual(output, "OPEN host=10.0.0.1 port=443 proto=tcp service='https'")
+
+    def test_fast_start_stats_prints_progress_and_rates(self) -> None:
+        rows = [
+            PortResult(
+                host="10.0.0.1",
+                port=443,
+                state="open",
+                protocol="tcp",
+                protocol_flag="SYN_ACK",
+                rtt_us=800.0,
+                payload_size=32,
+                timestamp_us=1,
+            )
+        ]
+
+        stream = io.StringIO()
+        stats = FastStartStats()
+        with patch("sys.stdout", stream):
+            stats.update(1, 2, rows)
+            stats.finish()
+
+        output = stream.getvalue()
+        self.assertIn("OPEN host=10.0.0.1 port=443 proto=tcp", output)
+        self.assertIn("ports=1/2", output)
+        self.assertIn("tx=", output)
+        self.assertIn("rx=", output)
+        self.assertIn("req/s=", output)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,10 @@ from training.tools.scanner_support import ICMP, IP, TCP, UDP, SCAPY_AVAILABLE, 
 from training.tools.scanner_types import PortResult, SNNProfile, TOP100_PORTS, TOP20_PORTS
 from training.tools.scanner_utils import _append_scan_note, _clean_probe_text, _format_probe_bytes, _normalize_result_text_fields, _recv_banner_chunks, _shannon_entropy
 
+MIN_PORT = 1
+MAX_PORT = 65535
+MAX_TARGETS = 4096
+
 try:
     import dns.exception as dns_exception
     import dns.flags as dns_flags
@@ -64,6 +68,7 @@ UDP_PAYLOADS = {
 def connect_probe(host: str, port: int, timeout: float = 1.0, source_port: Optional[int] = None) -> PortResult:
     import socket as sock
 
+    _validate_port(port, "tcp")
     ts_us = int(time.time() * 1_000_000)
     t0 = time.monotonic()
     probe_host = host.strip("[]")
@@ -128,6 +133,7 @@ def connect_probe(host: str, port: int, timeout: float = 1.0, source_port: Optio
 async def _async_connect_probe(host: str, port: int, timeout: float, ts_us: int) -> PortResult:
     import asyncio
     import time
+    _validate_port(port, "tcp")
     t0 = time.monotonic()
     try:
         fut = asyncio.open_connection(host, port)
@@ -261,6 +267,7 @@ def syn_probe(
     decoys: Optional[list[str]] = None,
     spoof_ttl: Optional[int] = None,
 ) -> PortResult:
+    _validate_port(port, "tcp")
     ts_us = int(time.time() * 1_000_000)
     sport = random.randint(1024, 65535)
     ttl_out = spoof_ttl if spoof_ttl is not None else profile.ttl
@@ -328,6 +335,8 @@ def batch_syn_probe(
 ) -> list[PortResult]:
     if not ports:
         return []
+    for port in ports:
+        _validate_port(port, "tcp")
 
     ttl_out = spoof_ttl if spoof_ttl is not None else profile.ttl
     timeout = max(float(profile.probe_timeout), 1.0)
@@ -436,6 +445,7 @@ def batch_syn_probe(
 
 
 def udp_probe(host: str, port: int, profile: SNNProfile) -> PortResult:
+    _validate_port(port, "udp")
     ts_us = int(time.time() * 1_000_000)
     payload = UDP_PAYLOADS.get(port, b"\x00")
     packet = IP(dst=host, ttl=profile.ttl) / UDP(dport=port) / payload  # type: ignore[operator]
@@ -533,6 +543,7 @@ def _probe_dns_version(host: str, port: int = 53, timeout: float = 2.0) -> dict[
 def udp_connect_probe(host: str, port: int, timeout: float = 2.0, source_port: Optional[int] = None) -> PortResult:
     import socket as sock
 
+    _validate_port(port, "udp")
     ts_us = int(time.time() * 1_000_000)
     t0 = time.monotonic()
     if port == 53:
@@ -633,47 +644,60 @@ def discover_hosts(targets: list[str], timeout: float = 2.0) -> list[str]:
     return live_hosts
 
 
-def parse_targets(spec: str) -> list[str]:
+def parse_targets(spec: str, max_targets: int = MAX_TARGETS) -> list[str]:
     targets: list[str] = []
+
+    def add_target(target: str) -> None:
+        if max_targets > 0 and len(targets) >= max_targets:
+            raise ValueError(f"too many targets resolved from {spec!r}: limit is {max_targets}")
+        targets.append(target)
+
     for part in spec.split(","):
         part = part.strip()
         if not part:
             continue
         if "/" in part:
-            targets.extend(str(ip) for ip in ipaddress.ip_network(part, strict=False).hosts())
+            network = ipaddress.ip_network(part, strict=False)
+            if max_targets > 0 and network.num_addresses > max_targets + 2:
+                raise ValueError(f"CIDR {part!r} is too large: limit is {max_targets} hosts")
+            for ip in network.hosts():
+                add_target(str(ip))
         elif "-" in part:
             base, _, end = part.rpartition("-")
             prefix = ".".join(base.split(".")[:-1])
             low = int(base.split(".")[-1])
             for octet in range(low, int(end) + 1):
-                targets.append(f"{prefix}.{octet}")
+                add_target(f"{prefix}.{octet}")
         else:
-            targets.append(part)
+            add_target(part)
     return targets
+
+
+def _validate_port(port: int, source: str) -> int:
+    if not MIN_PORT <= port <= MAX_PORT:
+        raise ValueError(f"invalid {source} port {port}: expected {MIN_PORT}-{MAX_PORT}")
+    return port
 
 
 def _parse_ports_from_file(path: Path, protocol: str = "tcp") -> list[int]:
     """Reads ports from a file, optionally filtering by protocol (TCP/UDP) headers."""
-    try:
-        lines = path.read_text().splitlines()
-        target_proto = protocol.upper()
-        current_proto = "TCP"  # Default if no header
-        relevant_lines = []
-        has_headers = any(line.strip().upper() in {"TCP", "UDP"} for line in lines)
+    lines = path.read_text().splitlines()
+    target_proto = protocol.upper()
+    current_proto = "TCP"  # Default if no header
+    relevant_lines = []
+    has_headers = any(line.strip().upper() in {"TCP", "UDP"} for line in lines)
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if line.upper() in {"TCP", "UDP"}:
-                current_proto = line.upper()
-                continue
-            if not has_headers or current_proto == target_proto:
-                relevant_lines.append(line)
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.upper() in {"TCP", "UDP"}:
+            current_proto = line.upper()
+            continue
+        if not has_headers or current_proto == target_proto:
+            relevant_lines.append(line)
 
-        return parse_ports(",".join(relevant_lines))
-    except Exception:
-        return []
+    return parse_ports(",".join(relevant_lines), protocol=protocol)
 
 
 def parse_ports(spec: str, protocol: str = "tcp") -> list[int]:
@@ -694,13 +718,16 @@ def parse_ports(spec: str, protocol: str = "tcp") -> list[int]:
         if "-" in part:
             low, _, high = part.partition("-")
             try:
-                ports.extend(range(int(low), int(high) + 1))
+                low_port = _validate_port(int(low), protocol)
+                high_port = _validate_port(int(high), protocol)
+                if high_port < low_port:
+                    raise ValueError(f"invalid {protocol} port range {part!r}: high port is below low port")
+                ports.extend(range(low_port, high_port + 1))
             except (ValueError, TypeError):
-                continue
+                raise
         else:
             try:
-                ports.append(int(part))
+                ports.append(_validate_port(int(part), protocol))
             except (ValueError, TypeError):
-                continue
+                raise
     return sorted(set(ports))
-

@@ -697,6 +697,7 @@ def _build_fast_start_scan_args(target: str) -> list[str]:
         "--checkpoint-every", "0",
         "--no-discovery",
         "--minimal-output",
+        "--fast-start-stats",
     ]
 
 
@@ -722,6 +723,8 @@ def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
         scan_args.append("--connect-only")
     if getattr(args, "minimal_output", False):
         scan_args.append("--minimal-output")
+    if getattr(args, "fast_start_stats", False):
+        scan_args.append("--fast-start-stats")
     if getattr(args, "decoys", False):
         scan_args.append("--decoys")
     if getattr(args, "no_discovery", False):
@@ -746,6 +749,7 @@ def _build_scan_args_from_namespace(args: argparse.Namespace) -> list[str]:
         nmap_extra = getattr(args, "nmap_extra", "")
         if nmap_extra:
             scan_args.extend(["--nmap-extra", nmap_extra])
+        scan_args.extend(["--nmap-timeout", str(getattr(args, "nmap_timeout", 900))])
     if getattr(args, "save_weights", None):
         scan_args.extend(["--save-weights", args.save_weights])
     if getattr(args, "spoof_ttl", None) is not None:
@@ -1113,6 +1117,7 @@ def _scanner_launch_menu() -> int:
             verify_args = ["--scan-csv", scan_csv, "--nmap-preset", nmap_preset]
             if nmap_extra:
                 verify_args.extend(["--nmap-extra", nmap_extra])
+            verify_args.extend(["--nmap-timeout", str(prompt_int("Nmap timeout seconds", 900))])
             return run_script("tools/verify_scan.py", verify_args)
         if choice == "7":
             _print_panel(
@@ -1172,20 +1177,20 @@ def interactive_menu() -> int:
         _print_panel(
             "Betta-Morpho Guided Launcher",
             "Fast path plus three guided branches:\n"
-            "4. Fast Start scan\n"
-            "1. Project learning and explanations\n"
-            "2. Model training\n"
-            "3. Scanner launch\n\n"
+            "1. Fast Start scan\n"
+            "2. Project learning and explanations\n"
+            "3. Model training\n"
+            "4. Scanner launch\n\n"
             "Each branch explains what the option does before you run it.",
             subtitle=f"Python: {preferred_python()}",
         )
         selection = _prompt_menu_choice(
             "Main Workflow Menu",
             [
-                ("4", "Fast Start", "Only ask for IP, then scan full TCP 1-65535 with aggressive speed 300 and open-port output"),
-                ("1", "Project learning", "Overview of workflow, artifacts, reports, transport, UDP, and verification"),
-                ("2", "Model training", "Train classifier, scanner, service model, host discovery model, or prepare datasets"),
-                ("3", "Scanner launch", "Run guided scans, verify past scans, discover hostnames, or use lab helpers"),
+                ("1", "Fast Start", "Only ask for IP, then scan full TCP 1-65535 with aggressive speed 300 and live statistics"),
+                ("2", "Project learning", "Overview of workflow, artifacts, reports, transport, UDP, and verification"),
+                ("3", "Model training", "Train classifier, scanner, service model, host discovery model, or prepare datasets"),
+                ("4", "Scanner launch", "Run guided scans, verify past scans, discover hostnames, or use lab helpers"),
                 ("0", "Exit", "Close the launcher"),
             ],
             "1",
@@ -1193,17 +1198,17 @@ def interactive_menu() -> int:
         if selection == "0":
             return 0
         if selection == "1":
-            _project_learning_menu()
-            continue
-        if selection == "2":
-            _model_training_menu()
-            continue
-        if selection == "3":
-            _scanner_launch_menu()
-            continue
-        if selection == "4":
             target = prompt_text("Target IP", "127.0.0.1")
             return run_script("training/tools/scanner.py", _build_fast_start_scan_args(target))
+        if selection == "2":
+            _project_learning_menu()
+            continue
+        if selection == "3":
+            _model_training_menu()
+            continue
+        if selection == "4":
+            _scanner_launch_menu()
+            continue
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1338,6 +1343,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Transport behavior: auto/raw-capable or connect-only")
     scan.add_argument("--minimal-output", action="store_true",
                       help="Print only open ports with minimal fields")
+    scan.add_argument("--fast-start-stats", action="store_true",
+                      help="Show one-line Fast Start scan statistics")
     scan.add_argument("--artifact", default=None,
                       help="Trained scanner artifact JSON")
     scan.add_argument("--service-artifact", default=None,
@@ -1368,6 +1375,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Named Nmap flag preset for verification (deep/quick/stealth/scripts-only/aggressive/udp/os-detect/vuln)")
     scan.add_argument("--nmap-extra", default="",
                       help="Extra Nmap flags appended after the preset, space-separated")
+    scan.add_argument("--nmap-timeout", type=int, default=900,
+                      help="Abort Nmap verification after N seconds")
     scan.add_argument("--save-weights", default=None,
                       help="Save adapted scanner weights after the run")
     scan.add_argument("--spoof-ttl", type=int, default=None,

@@ -74,6 +74,26 @@ class RawProbeSafetyTests(unittest.TestCase):
         self.assertEqual(len(results), len(ports))
         self.assertTrue(all(result.protocol_flag == "RST" for result in results))
 
+    def test_parse_ports_rejects_out_of_range_values(self) -> None:
+        with self.assertRaises(ValueError):
+            scanner_probes.parse_ports("0")
+        with self.assertRaises(ValueError):
+            scanner_probes.parse_ports("70000")
+        with self.assertRaises(ValueError):
+            scanner_probes.parse_ports("65534-70000")
+
+    def test_connect_probe_rejects_out_of_range_port_before_socket_layer(self) -> None:
+        with self.assertRaises(ValueError):
+            scanner_probes.connect_probe("127.0.0.1", 70000, timeout=0.01)
+
+    def test_parse_ports_missing_file_raises(self) -> None:
+        with self.assertRaises(FileNotFoundError):
+            scanner_probes.parse_ports("@/definitely/missing/ports.txt")
+
+    def test_parse_targets_rejects_large_cidr_before_expansion(self) -> None:
+        with self.assertRaises(ValueError):
+            scanner_probes.parse_targets("10.0.0.0/8")
+
 
 if __name__ == "__main__":
     unittest.main()

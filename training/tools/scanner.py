@@ -25,6 +25,7 @@ import os
 import random
 import socket as _socket
 import sqlite3
+import subprocess
 import sys
 import time
 from collections import Counter
@@ -455,6 +456,80 @@ def _format_elapsed(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def _format_progress_bar(scanned: int, total: int, width: int = 24) -> str:
+    if total <= 0:
+        return "[" + "-" * width + "]"
+    filled = int(round(width * min(max(scanned / total, 0.0), 1.0)))
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
+def _estimate_tcp_traffic_kb(results: list[PortResult]) -> tuple[float, float]:
+    tx_bytes = 0
+    rx_bytes = 0
+    for result in results:
+        tx_bytes += 64
+        if result.protocol_flag != "TIMEOUT":
+            rx_bytes += 64
+        if result.payload_size > 0:
+            rx_bytes += result.payload_size
+    return tx_bytes / 1024.0, rx_bytes / 1024.0
+
+
+class FastStartStats:
+    def __init__(self) -> None:
+        self.started_perf = time.monotonic()
+        self._last_line_len = 0
+        self._finished = False
+        self.scanned_ports = 0
+        self.total_ports = 0
+        self.seen_open_ports: set[tuple[str, int, str]] = set()
+
+    def _new_open_results(self, results: list[PortResult]) -> list[PortResult]:
+        new_open_results = []
+        for result in results:
+            if result.state != "open":
+                continue
+            key = (result.host, result.port, result.protocol)
+            if key in self.seen_open_ports:
+                continue
+            self.seen_open_ports.add(key)
+            new_open_results.append(result)
+        return sorted(new_open_results, key=lambda item: (item.host, item.port, item.protocol))
+
+    def _print_stats_line(self, line: str) -> None:
+        padding = " " * max(0, self._last_line_len - len(line))
+        print(line + padding, end="", flush=True)
+        self._last_line_len = len(line)
+
+    def update(self, scanned_ports: int, total_ports: int, results: list[PortResult]) -> None:
+        self.scanned_ports = scanned_ports
+        self.total_ports = total_ports
+        new_open_results = self._new_open_results(results)
+        elapsed = max(time.monotonic() - self.started_perf, 0.001)
+        tx_kb, rx_kb = _estimate_tcp_traffic_kb(results)
+        requests_per_second = scanned_ports / elapsed
+        percent = (100.0 * scanned_ports / total_ports) if total_ports else 0.0
+        line = (
+            f"\r{_format_progress_bar(scanned_ports, total_ports)} "
+            f"{percent:5.1f}%  ports={scanned_ports}/{total_ports}  "
+            f"time={_format_elapsed(elapsed)}  tx={tx_kb:.1f}KB  rx={rx_kb:.1f}KB  "
+            f"req/s={requests_per_second:.1f}"
+        )
+        if new_open_results:
+            if self._last_line_len == 0:
+                self._print_stats_line(line)
+            print()
+            self._last_line_len = 0
+            for result in new_open_results:
+                print(_format_open_result_line(result, minimal=True), flush=True)
+        self._print_stats_line(line)
+
+    def finish(self) -> None:
+        if not self._finished:
+            print()
+            self._finished = True
+
+
 class ScanCheckpointWriter:
     """Persist periodic scan checkpoints to reduce data loss on long runs."""
 
@@ -852,6 +927,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan_cmd.add_argument("--progress-log", metavar="PATH", help="Append scan start/checkpoint timing to PATH")
     scan_cmd.add_argument("--connect-only", action="store_true", help="Force TCP connect probes instead of raw packet probes")
     scan_cmd.add_argument("--minimal-output", action="store_true", help="Print only open ports with minimal fields")
+    scan_cmd.add_argument("--fast-start-stats", action="store_true", help="Show one-line Fast Start scan statistics")
     scan_cmd.add_argument("--verify-with-nmap", action="store_true", help="Run targeted Nmap verification against Betta-Morpho-open ports after the scan")
     scan_cmd.add_argument("--no-classify", action="store_true", help="Skip auto-classification after the scan")
     scan_cmd.add_argument(
@@ -871,6 +947,7 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Named Nmap flag preset used when --verify-with-nmap is active (deep/quick/stealth/scripts-only/aggressive/udp/os-detect/vuln)")
     scan_cmd.add_argument("--nmap-extra", default="",
                           help="Extra Nmap flags appended after the preset, space-separated")
+    scan_cmd.add_argument("--nmap-timeout", type=int, default=900, metavar="N", help="Abort Nmap verification after N seconds")
 
     classify_cmd = subcommands.add_parser("classify-results", help="Load scan CSV and add predicted_label via the SNN classifier")
     classify_cmd.add_argument("--data", required=True, help="Input scan CSV path")
@@ -908,6 +985,7 @@ def main() -> int:
             return 1
 
         minimal_output = bool(getattr(args, "minimal_output", False))
+        fast_start_stats = bool(getattr(args, "fast_start_stats", False))
         os.environ[SERVICE_CATALOG_ENV] = str(Path(args.service_catalog))
 
         artifact = Path(args.artifact) if args.artifact else None
@@ -965,8 +1043,17 @@ def main() -> int:
             if not getattr(args, "host_discovery_html", None):
                 args.host_discovery_html = str(_session_output_path(args.output, "hostnames_report", ".html"))
 
-        targets = parse_targets(args.target)
-        ports = parse_ports(args.ports, protocol="tcp")
+        try:
+            targets = parse_targets(args.target)
+            ports = parse_ports(args.ports, protocol="tcp")
+            if not ports:
+                raise ValueError(f"no TCP ports resolved from {args.ports!r}")
+            udp_ports = parse_ports(args.ports_udp, protocol="udp") if args.ports_udp else []
+            if args.ports_udp and not udp_ports:
+                raise ValueError(f"no UDP ports resolved from {args.ports_udp!r}")
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: invalid scan input: {exc}")
+            return 2
         source_ports_to_check = []
         if args.source_port is not None:
             source_ports_to_check.append(("primary", args.source_port, bool(args.ports_udp)))
@@ -987,7 +1074,6 @@ def main() -> int:
 
         engine = SpikeScanEngine(profile=args.profile, artifact=artifact, speed_level=args.speed_level)
         decoys = _random_decoys(3) if args.decoys else None
-        udp_ports = parse_ports(args.ports_udp, protocol="udp") if args.ports_udp else []
 
         stealth_info = []
         if args.spoof_ttl:
@@ -1027,6 +1113,7 @@ def main() -> int:
 
             total_hosts = len(targets)
             for index, host in enumerate(targets, start=1):
+                live_stats = FastStartStats() if fast_start_stats else None
                 if total_hosts > 1:
                     if not minimal_output:
                         _print(f"\n[bold cyan][Betta-Morpho] scanning[/] {host} ({index}/{total_hosts})")
@@ -1036,6 +1123,8 @@ def main() -> int:
                 def _checkpoint(scanned_ports: int, total_ports: int, partial_results: list[PortResult]) -> None:
                     if total_ports <= 0:
                         return
+                    if live_stats is not None:
+                        live_stats.update(scanned_ports, total_ports, partial_results)
                     progress_writer.checkpoint(host, scanned_ports, all_results + partial_results)
 
                 host_results = engine.scan(
@@ -1077,7 +1166,14 @@ def main() -> int:
 
                 enrich_port_results(host_results, service_artifact=service_artifact)
                 all_results.extend(host_results)
-                display_results(host_results, minimal=minimal_output)
+                if live_stats is not None:
+                    if live_stats.scanned_ports != len(host_results) or live_stats.total_ports != len(ports):
+                        live_stats.update(len(host_results), len(ports), host_results)
+                    live_stats.finish()
+                    if not live_stats.seen_open_ports:
+                        print("No open ports found.")
+                else:
+                    display_results(host_results, minimal=minimal_output)
                 if args.jitter_ms and index < total_hosts:
                     time.sleep(random.uniform(0, args.jitter_ms / 1000.0))
 
@@ -1109,6 +1205,7 @@ def main() -> int:
                                 service_catalog=args.service_catalog,
                                 nmap_preset=getattr(args, "nmap_preset", "deep"),
                                 nmap_extra=getattr(args, "nmap_extra", ""),
+                                nmap_timeout=int(getattr(args, "nmap_timeout", 900)),
                             )
                             _print(
                                 "[bold green][Betta-Morpho] Nmap verify:[/] "
@@ -1116,7 +1213,7 @@ def main() -> int:
                                 + f"betta_only={len(verification_summary.get('betta_morpho_only_ports', []))} "
                                 + f"nmap_only={len(verification_summary.get('nmap_only_ports', []))}"
                             )
-                    except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError) as exc:
+                    except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
                         _print(f"[yellow][Betta-Morpho] Nmap verification skipped: {exc}[/]")
                 else:
                     _print("[yellow][Betta-Morpho] Nmap verification skipped: requires --output or --report.[/]")

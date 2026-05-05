@@ -38,7 +38,7 @@ class VerifyScanTests(unittest.TestCase):
             session_prefix = "20260404_132857_127.0.0.1"
 
             with patch("tools.verify_scan.shutil.which", return_value="/usr/bin/nmap"), patch("tools.verify_scan.subprocess.run") as run_mock:
-                xml_path = run_nmap("nmap", "127.0.0.1", [22, 80], output_dir, session_prefix)
+                xml_path = run_nmap("nmap", "127.0.0.1", [22, 80], output_dir, session_prefix, timeout_seconds=123)
 
             self.assertEqual(
                 xml_path,
@@ -46,6 +46,7 @@ class VerifyScanTests(unittest.TestCase):
             )
             command = run_mock.call_args.args[0]
             self.assertIn(str(output_dir / "20260404_132857_127.0.0.1_nmap_verify"), command)
+            self.assertEqual(run_mock.call_args.kwargs["timeout"], 123)
 
     def test_parse_nmap_xml_extracts_verified_os_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

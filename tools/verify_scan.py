@@ -104,6 +104,7 @@ NMAP_PRESETS: list[tuple[str, str, str, list[str]]] = [
 ]
 
 NMAP_DEFAULT_PRESET = "deep"
+NMAP_DEFAULT_TIMEOUT_SECONDS = 900
 
 
 def resolve_nmap_flags(preset_name: str, extra: str = "") -> list[str]:
@@ -129,6 +130,8 @@ def parse_args() -> argparse.Namespace:
                         help=f"Named nmap flag preset ({', '.join(n for _, n, _, _ in NMAP_PRESETS)})")
     parser.add_argument("--nmap-extra", default="",
                         help="Extra nmap flags appended after the preset, space-separated (e.g. '--script=banner -v')")
+    parser.add_argument("--nmap-timeout", type=int, default=NMAP_DEFAULT_TIMEOUT_SECONDS,
+                        help=f"Abort Nmap verification after N seconds (default: {NMAP_DEFAULT_TIMEOUT_SECONDS})")
     parser.add_argument("--service-catalog", default="artifacts/service_catalog.json", help="Internal service catalog artifact used for normalization")
     return parser.parse_args()
 
@@ -162,6 +165,7 @@ def run_nmap(
     session_prefix: str,
     nmap_preset: str = NMAP_DEFAULT_PRESET,
     nmap_extra: str = "",
+    timeout_seconds: int = NMAP_DEFAULT_TIMEOUT_SECONDS,
 ) -> Path:
     if shutil.which(nmap_bin) is None:
         raise FileNotFoundError(f"nmap executable not found: {nmap_bin}")
@@ -179,7 +183,7 @@ def run_nmap(
         str(base),
     ]
     print(f"[nmap] running: {' '.join(command)}")
-    subprocess.run(command, check=True)
+    subprocess.run(command, check=True, timeout=timeout_seconds)
     return base.parent / f"{base.name}.xml"
 
 
@@ -367,6 +371,7 @@ def verify_betta_morpho_csv(
     service_catalog: str | Path | None = None,
     nmap_preset: str = NMAP_DEFAULT_PRESET,
     nmap_extra: str = "",
+    nmap_timeout: int = NMAP_DEFAULT_TIMEOUT_SECONDS,
 ) -> dict:
     if service_catalog is not None:
         os.environ[SERVICE_CATALOG_ENV] = str(Path(service_catalog))
@@ -392,6 +397,7 @@ def verify_betta_morpho_csv(
         session_prefix,
         nmap_preset=nmap_preset,
         nmap_extra=nmap_extra,
+        timeout_seconds=nmap_timeout,
     )
     nmap_results = parse_nmap_xml(xml_path)
     comparison_csv, comparison_json = write_comparison(
@@ -421,11 +427,12 @@ def main() -> int:
             service_catalog=args.service_catalog,
             nmap_preset=args.nmap_preset,
             nmap_extra=args.nmap_extra,
+            nmap_timeout=args.nmap_timeout,
         )
     except FileNotFoundError as exc:
         print(f"ERROR: {exc}")
         return 2
-    except (OSError, ValueError, subprocess.CalledProcessError, ET.ParseError) as exc:
+    except (OSError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ET.ParseError) as exc:
         print(f"ERROR: verification failed: {exc}")
         return 1
 
@@ -443,4 +450,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

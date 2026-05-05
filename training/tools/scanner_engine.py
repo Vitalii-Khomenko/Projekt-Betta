@@ -283,6 +283,8 @@ class SpikeScanEngine:
                         
                 batch_results.sort(key=lambda result: result.port)
                 results.extend(batch_results)
+                if progress_callback is not None and checkpoint_step == 0:
+                    progress_callback(port_index, len(ports), list(results))
                 if batch_results:
                     last = batch_results[-1]
                     last_flag = last.protocol_flag
